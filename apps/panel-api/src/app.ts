@@ -254,6 +254,12 @@ export async function buildApp({ cfg, db, nodes }: AppDeps, opts: { logger?: boo
     return view;
   });
 
+  app.get("/api/servers/:id/info", async (req) => {
+    const me = requireMe(req);
+    const { row, node } = await serverFor(me, (req.params as { id: string }).id);
+    return nodes.client(node).info(row.id);
+  });
+
   // --- create -----------------------------------------------------------------
 
   app.post("/api/servers", async (req, reply) => {

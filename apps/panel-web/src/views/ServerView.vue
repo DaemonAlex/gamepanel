@@ -3,15 +3,14 @@ import { computed, defineAsyncComponent, onMounted, onUnmounted, ref } from "vue
 import type { PowerAction, ServerView } from "@gamepanel/shared";
 import { api } from "../api.js";
 import ConsolePanel from "../components/ConsolePanel.vue";
-
-import { barClass, copy, gib, pct, stateOf, uptime } from "../format.js";
+import OverviewPanel from "../components/OverviewPanel.vue";
+import { stateOf, uptime } from "../format.js";
 
 const props = defineProps<{ id: string }>();
 const server = ref<ServerView | null>(null);
 const error = ref("");
 const busy = ref<PowerAction | null>(null);
 const confirmKill = ref(false);
-const copied = ref(false);
 let timer: ReturnType<typeof setInterval> | undefined;
 
 // The file manager carries the code editor, so it loads only when opened.
@@ -43,7 +42,6 @@ onUnmounted(() => clearInterval(timer));
 
 const state = computed(() => (server.value ? stateOf(server.value) : "loading"));
 const isUp = computed(() => ["running", "starting", "restarting"].includes(state.value));
-const mem = computed(() => (server.value?.stats ? pct(server.value.stats.memoryBytes, server.value.stats.memoryLimitBytes) : 0));
 
 async function power(action: PowerAction) {
   confirmKill.value = false;
@@ -58,11 +56,6 @@ async function power(action: PowerAction) {
   }
 }
 
-async function copyAddress() {
-  if (!server.value) return;
-  copied.value = await copy(server.value.address);
-  setTimeout(() => (copied.value = false), 1500);
-}
 </script>
 
 <template>
@@ -81,12 +74,6 @@ async function copyAddress() {
             <template v-if="server.stats?.version"> &middot; {{ server.stats.version }}</template>
           </p>
         </div>
-      </section>
-
-      <section class="addr">
-        <span class="label">Address</span>
-        <span class="mono big-addr">{{ server.address }}</span>
-        <button class="btn" type="button" @click="copyAddress">{{ copied ? "Copied" : "Copy" }}</button>
       </section>
 
       <section class="panel row">
@@ -108,29 +95,7 @@ async function copyAddress() {
         <button v-for="t in tabs" :key="t" type="button" role="tab" :aria-selected="tab === t" :class="{ on: tab === t }" @click="pick(t)">{{ t }}</button>
       </nav>
 
-      <section v-if="tab === 'overview'" class="stats">
-        <div class="panel">
-          <p class="label">Players</p>
-          <p class="num">{{ server.stats?.players ? `${server.stats.players.online} / ${server.stats.players.max}` : "-" }}</p>
-          <p v-if="server.stats?.players?.names.length" class="muted small">{{ server.stats.players.names.join(", ") }}</p>
-        </div>
-        <div class="panel">
-          <p class="label">CPU</p>
-          <p class="num">{{ server.stats ? `${server.stats.cpuPercent}%` : "-" }}</p>
-          <p class="muted small">{{ server.cpus }} cores allowed</p>
-        </div>
-        <div class="panel">
-          <p class="label">RAM</p>
-          <p class="num">{{ server.stats ? gib(server.stats.memoryBytes) : "-" }}</p>
-          <div :class="barClass(mem)"><span :style="{ width: `${mem}%` }"></span></div>
-          <p class="muted small">{{ server.memoryMb }} MB heap</p>
-        </div>
-        <div class="panel">
-          <p class="label">Port</p>
-          <p class="num mono">{{ server.port }}</p>
-          <p class="muted small">{{ server.publicIp }}</p>
-        </div>
-      </section>
+      <OverviewPanel v-if="tab === 'overview'" :server="server" />
 
       <ConsolePanel v-if="tab === 'console'" :id="server.id" class="panel" />
       <FilesPanel v-if="tab === 'files'" :id="server.id" class="panel" />
