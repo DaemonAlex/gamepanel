@@ -17,6 +17,10 @@ import {
   playerActionSchema,
   backupNameSchema,
   scheduleSchema,
+  installSchema,
+  versionChangeSchema,
+  type PluginsView,
+  type VersionJob,
   type BackupsView,
   type ScheduleView,
   checkProperty,
@@ -35,6 +39,7 @@ import type { PanelConfig } from "./config.js";
 import { schema, type Db } from "./db/index.js";
 import { containerBytesFor, memoryFits, nextFreePort } from "./services/allocation.js";
 import { audit } from "./services/audit.js";
+import { resolve as resolvePlugin, search as searchCatalog, updates as pluginUpdates } from "./services/catalog.js";
 import { computeWarnings, nodeSeries, serverSeries, sparks, warningInput } from "./services/metrics.js";
 import type { NodeRow, Nodes } from "./services/nodes.js";
 
@@ -435,6 +440,156 @@ export async function buildApp({ cfg, db, nodes }: AppDeps, opts: { logger?: boo
       void audit(db, { userId: me!.id, action: "console.command", serverId: target.row.id, ip: req.ip, detail: { cmd: parsed.data.cmd } });
     });
     socket.on("close", () => upstream.close());
+  });
+
+  // --- plugins and mods ------------------------------------------------------------
+
+  const folderFor = (type: string): "plugins" | "mods" | null =>
+    type === "PAPER" || type === "PURPUR" ? "plugins" : type === "FABRIC" || type === "FORGE" || type === "NEOFORGE" ? "mods" : null;
+
+  // The exact Minecraft version: the server records it once it has run; before
+  // that the version it was created with.
+  async function mcVersionOf(row: ServerRow, node: NodeRow): Promise<string> {
+    if (row.version !== "LATEST") return row.version;
+    const info = await nodes.client(node).info(row.id).catch(() => null);
+    return info?.build?.match(/MC: ([\d.]+)/)?.[1] ?? row.version;
+  }
+
+  async function pluginTarget(req: FastifyRequest) {
+    const me = requireMe(req);
+    const ip = req.ip;
+    const { row, node } = await serverFor(me, (req.params as { id: string }).id);
+    const folder = folderFor(row.type);
+    if (!folder) throw new HttpError(400, "Vanilla servers have no plugins or mods");
+    return { me, ip, row, node, folder, client: nodes.client(node) };
+  }
+
+  app.get("/api/servers/:id/plugins", async (req): Promise<PluginsView> => {
+    const me = requireMe(req);
+    const { row, node } = await serverFor(me, (req.params as { id: string }).id);
+    const folder = folderFor(row.type);
+    const mcVersion = await mcVersionOf(row, node);
+    if (!folder) return { folder: null, mcVersion, items: [] };
+    const items = await nodes.client(node).plugins(row.id, folder);
+    const ups = await pluginUpdates(items.map((i) => i.sha1).filter(Boolean), row.type, mcVersion);
+    return { folder, mcVersion, items: items.map((i) => ({ ...i, update: ups[i.sha1] ?? null })) };
+  });
+
+  app.get("/api/servers/:id/plugins/search", async (req) => {
+    const t = await pluginTarget(req);
+    const q = String((req.query as { q?: string }).q ?? "").trim().slice(0, 100);
+    if (!q) return [];
+    return searchCatalog(q, t.row.type, await mcVersionOf(t.row, t.node)).catch((e: Error) => {
+      throw new HttpError(502, e.message);
+    });
+  });
+
+  app.post("/api/servers/:id/plugins/install", async (req) => {
+    const t = await pluginTarget(req);
+    const { source, id } = installSchema.parse(req.body);
+    const mc = await mcVersionOf(t.row, t.node);
+    const file = await resolvePlugin(source, id, t.row.type, mc).catch((e: Error) => {
+      throw new HttpError(404, e.message);
+    });
+    const result = await t.client.installPlugin(t.row.id, t.folder, file);
+    await audit(db, { userId: t.me.id, action: "plugin.install", serverId: t.row.id, ip: t.ip, detail: { source, id, version: file.version, file: result.file } });
+    return { ...result, version: file.version };
+  });
+
+  // Update one installed jar to the newest version that fits; the old jar goes to the trash.
+  app.post("/api/servers/:id/plugins/update", async (req) => {
+    const t = await pluginTarget(req);
+    const file = String((req.body as { file?: unknown } | undefined)?.file ?? "");
+    const item = (await t.client.plugins(t.row.id, t.folder)).find((i) => i.file === file);
+    if (!item) throw new HttpError(404, "plugin not found");
+    const up = (await pluginUpdates([item.sha1], t.row.type, await mcVersionOf(t.row, t.node)))[item.sha1];
+    if (!up) throw new HttpError(409, "no newer version for this server");
+    const result = await t.client.installPlugin(t.row.id, t.folder, up);
+    if (result.file !== item.file) await t.client.removeFile(t.row.id, `${t.folder}/${item.file}`);
+    await audit(db, { userId: t.me.id, action: "plugin.update", serverId: t.row.id, ip: t.ip, detail: { from: item.file, to: result.file, version: up.version } });
+    return { ...result, version: up.version };
+  });
+
+  app.post("/api/servers/:id/plugins/enabled", async (req) => {
+    const t = await pluginTarget(req);
+    const { file, on } = (req.body ?? {}) as { file?: unknown; on?: unknown };
+    const r = await t.client.setPluginEnabled(t.row.id, t.folder, String(file ?? ""), on === true);
+    await audit(db, { userId: t.me.id, action: on === true ? "plugin.enable" : "plugin.disable", serverId: t.row.id, ip: t.ip, detail: { file, now: r.file } });
+    return r;
+  });
+
+  app.delete("/api/servers/:id/plugins/:file", async (req) => {
+    const t = await pluginTarget(req);
+    const file = String((req.params as { file?: string }).file ?? "");
+    if (!/^[^/\\]+\.jar(\.disabled)?$/.test(file)) throw new HttpError(400, "not a plugin file");
+    const r = await t.client.removeFile(t.row.id, `${t.folder}/${file}`);
+    await audit(db, { userId: t.me.id, action: "plugin.delete", serverId: t.row.id, ip: t.ip, detail: { file, trashedTo: r.trashedTo } });
+    return { ok: true };
+  });
+
+  // --- logs --------------------------------------------------------------------------
+
+  app.get("/api/servers/:id/logs", async (req) => {
+    const me = requireMe(req);
+    const { row, node } = await serverFor(me, (req.params as { id: string }).id);
+    return nodes.client(node).logs(row.id);
+  });
+
+  app.get("/api/servers/:id/logs/read", async (req) => {
+    const me = requireMe(req);
+    const { row, node } = await serverFor(me, (req.params as { id: string }).id);
+    const q = req.query as { path?: string; search?: string };
+    return nodes.client(node).readLog(row.id, String(q.path ?? ""), String(q.search ?? "").slice(0, 200));
+  });
+
+  // --- version change ------------------------------------------------------------------
+  // Backup first (always), then switch type or version. Runs in the background
+  // because a backup can take minutes; the page polls the job.
+
+  const versionJobs = new Map<string, VersionJob>();
+
+  app.get("/api/servers/:id/version-job", async (req) => {
+    const me = requireMe(req);
+    const { row } = await serverFor(me, (req.params as { id: string }).id);
+    return versionJobs.get(row.id) ?? null;
+  });
+
+  app.post("/api/servers/:id/version", async (req, reply) => {
+    const me = requireMe(req);
+    const ip = req.ip;
+    const { row, node } = await serverFor(me, (req.params as { id: string }).id);
+    const to = versionChangeSchema.parse(req.body);
+    const running = versionJobs.get(row.id);
+    if (running && (running.state === "backing-up" || running.state === "applying")) throw new HttpError(409, "a version change is already running");
+    const client = nodes.client(node);
+    const status = await client.status(row.id);
+    if (status.state !== "stopped" && status.state !== "created") throw new HttpError(409, "stop the server first");
+    const job: VersionJob = { state: "backing-up", from: { type: row.type, version: row.version }, to, startedAt: new Date().toISOString() };
+    versionJobs.set(row.id, job);
+    await audit(db, { userId: me.id, action: "server.version", serverId: row.id, ip, detail: { from: job.from, to } });
+
+    void (async () => {
+      try {
+        const b = await client.startBackup(row.id, "manual", row.backupKeep + 1);
+        for (;;) {
+          await new Promise((r) => setTimeout(r, 3000));
+          const j = (await client.backups(row.id)).jobs.find((x) => x.id === b.id);
+          if (!j || j.state === "failed") throw new Error(`backup failed${j?.error ? `: ${j.error}` : ""}; nothing was changed`);
+          if (j.state === "done") {
+            if (j.backup) job.backup = j.backup;
+            break;
+          }
+        }
+        job.state = "applying";
+        await client.apply({ id: row.id, type: to.type, version: to.version, memoryMb: row.memoryMb, cpus: row.cpus, port: row.port, eulaAccepted: true });
+        await db.update(schema.servers).set({ type: to.type, version: to.version }).where(eq(schema.servers.id, row.id));
+        job.state = "done";
+      } catch (err) {
+        job.state = "failed";
+        job.error = (err as Error).message;
+      }
+    })();
+    return reply.code(202).send(job);
   });
 
   // --- backups -------------------------------------------------------------------

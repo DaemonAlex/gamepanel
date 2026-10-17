@@ -1,4 +1,4 @@
-import type { BackupJob, BackupsView, ScheduleInput, ScheduleView, Dashboard, Me, MetricPoint, MetricRange, NewServer, NodeMetricPoint, PlayerAction, PlayersView, PowerAction, ServerInfo, ServerView } from "@gamepanel/shared";
+import type { CatalogHit, LogFile, LogRead, PluginsView, VersionJob, ServerType, BackupJob, BackupsView, ScheduleInput, ScheduleView, Dashboard, Me, MetricPoint, MetricRange, NewServer, NodeMetricPoint, PlayerAction, PlayersView, PowerAction, ServerInfo, ServerView } from "@gamepanel/shared";
 
 // Talking to the panel API. Every change carries the x-gamepanel header the API requires.
 
@@ -33,6 +33,17 @@ export const api = {
   server: (id: string) => call<ServerView>("GET", `/api/servers/${encodeURIComponent(id)}`),
   metrics: (id: string, range: MetricRange) => call<MetricPoint[]>("GET", `/api/servers/${encodeURIComponent(id)}/metrics?range=${range}`),
   nodeMetrics: (id: string, range: MetricRange) => call<NodeMetricPoint[]>("GET", `/api/nodes/${encodeURIComponent(id)}/metrics?range=${range}`),
+  plugins: (id: string) => call<PluginsView>("GET", `/api/servers/${encodeURIComponent(id)}/plugins`),
+  searchPlugins: (id: string, q: string) => call<CatalogHit[]>("GET", `/api/servers/${encodeURIComponent(id)}/plugins/search?q=${encodeURIComponent(q)}`),
+  installPlugin: (id: string, source: string, pid: string) => call<{ file: string }>("POST", `/api/servers/${encodeURIComponent(id)}/plugins/install`, { source, id: pid }),
+  updatePlugin: (id: string, file: string) => call<{ file: string }>("POST", `/api/servers/${encodeURIComponent(id)}/plugins/update`, { file }),
+  setPluginEnabled: (id: string, file: string, on: boolean) => call<{ file: string }>("POST", `/api/servers/${encodeURIComponent(id)}/plugins/enabled`, { file, on }),
+  deletePlugin: (id: string, file: string) => call<{ ok: true }>("DELETE", `/api/servers/${encodeURIComponent(id)}/plugins/${encodeURIComponent(file)}`),
+  logs: (id: string) => call<LogFile[]>("GET", `/api/servers/${encodeURIComponent(id)}/logs`),
+  readLog: (id: string, path: string, search: string) =>
+    call<LogRead>("GET", `/api/servers/${encodeURIComponent(id)}/logs/read?path=${encodeURIComponent(path)}${search ? `&search=${encodeURIComponent(search)}` : ""}`),
+  versionJob: (id: string) => call<VersionJob | null>("GET", `/api/servers/${encodeURIComponent(id)}/version-job`),
+  changeVersion: (id: string, type: ServerType, version: string) => call<VersionJob>("POST", `/api/servers/${encodeURIComponent(id)}/version`, { type, version }),
   backups: (id: string) => call<BackupsView>("GET", `/api/servers/${encodeURIComponent(id)}/backups`),
   startBackup: (id: string) => call<BackupJob>("POST", `/api/servers/${encodeURIComponent(id)}/backups`, {}),
   restoreBackup: (id: string, name: string) => call<BackupJob>("POST", `/api/servers/${encodeURIComponent(id)}/backups/restore`, { name }),

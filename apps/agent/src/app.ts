@@ -6,6 +6,8 @@ import { backupNameSchema, consoleInSchema, playerActionSchema, propertyChangesS
 import { tokenMatches } from "./auth.js";
 import { BackupError } from "./backups.js";
 import { FileError } from "./files.js";
+import { listLogs, readLog } from "./logs.js";
+import { installFromUrl, listPlugins, setEnabled } from "./plugins.js";
 import { ImportError } from "./import.js";
 import { ConflictError, type Servers } from "./servers.js";
 
@@ -61,6 +63,43 @@ export async function buildApp(token: string, servers: Servers, opts: FastifySer
   app.get("/v1/servers/:id/properties", async (req) => ({ values: await servers.properties(parseId(req.params)) }));
 
   app.put("/v1/servers/:id/properties", async (req) => servers.setProperties(parseId(req.params), propertyChangesSchema.parse(req.body).changes));
+
+  // --- plugins and mods ------------------------------------------------------
+  const folderOf = (req: { query: unknown }) => {
+    const f = (req.query as { folder?: string }).folder;
+    if (f !== "plugins" && f !== "mods") throw new FileError("folder must be plugins or mods");
+    return f;
+  };
+
+  app.get("/v1/servers/:id/plugins", async (req) => listPlugins(servers.files(parseId(req.params)), folderOf(req)));
+
+  app.post("/v1/servers/:id/plugins/enabled", async (req) => {
+    const { file, on } = (req.body ?? {}) as { file?: unknown; on?: unknown };
+    return { file: await setEnabled(servers.files(parseId(req.params)), folderOf(req), String(file ?? ""), on === true) };
+  });
+
+  app.post("/v1/servers/:id/plugins/install", async (req) => {
+    const b = (req.body ?? {}) as { url?: unknown; filename?: unknown; sha512?: unknown; sha256?: unknown; sha1?: unknown };
+    const str = (v: unknown) => (typeof v === "string" ? v : undefined);
+    return installFromUrl(servers.files(parseId(req.params)), folderOf(req), {
+      url: String(b.url ?? ""),
+      filename: String(b.filename ?? ""),
+      ...(str(b.sha512) ? { sha512: str(b.sha512)! } : {}),
+      ...(str(b.sha256) ? { sha256: str(b.sha256)! } : {}),
+      ...(str(b.sha1) ? { sha1: str(b.sha1)! } : {}),
+    });
+  });
+
+  // --- logs --------------------------------------------------------------------
+  app.get("/v1/servers/:id/logs", async (req) => listLogs(servers.files(parseId(req.params))));
+
+  app.get("/v1/servers/:id/logs/read", async (req) => {
+    const qy = req.query as { path?: string; search?: string; tail?: string };
+    return readLog(servers.files(parseId(req.params)), String(qy.path ?? ""), {
+      ...(qy.search ? { search: qy.search.slice(0, 200) } : {}),
+      ...(qy.tail ? { tail: Number(qy.tail) } : {}),
+    });
+  });
 
   // --- backups ---------------------------------------------------------------
   const bname = (params: unknown) => backupNameSchema.parse((params as { name?: unknown }).name);

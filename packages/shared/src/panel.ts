@@ -143,3 +143,81 @@ export interface BackupsView {
   jobs: import("./server.js").BackupJob[];
   keep: number;
 }
+
+// --- plugins and mods ---
+
+export interface PluginItem {
+  file: string;
+  name: string;
+  version: string;
+  enabled: boolean;
+  bytes: number;
+  sha1: string;
+}
+
+export interface PluginUpdate {
+  version: string;
+  url: string;
+  filename: string;
+  // Modrinth publishes SHA-512, Hangar SHA-256.
+  sha512?: string;
+  sha256?: string;
+  // A jump in the first version number (e.g. 4.x to 5.x): may change configs or commands.
+  major?: boolean;
+}
+
+export interface PluginsView {
+  // "plugins" for Paper/Purpur, "mods" for Fabric/Forge/NeoForge, null for Vanilla.
+  folder: "plugins" | "mods" | null;
+  mcVersion: string;
+  items: (PluginItem & { update: PluginUpdate | null })[];
+}
+
+export interface CatalogHit {
+  source: "modrinth" | "hangar";
+  id: string;
+  title: string;
+  description: string;
+  author: string;
+  downloads: number;
+  icon: string | null;
+  url: string;
+}
+
+export const installSchema = z.object({
+  source: z.enum(["modrinth", "hangar"]),
+  id: z.string().min(1).max(120).regex(/^[A-Za-z0-9_./-]+$/),
+});
+
+// --- logs ---
+
+export interface LogFile {
+  path: string;
+  kind: "log" | "crash";
+  bytes: number;
+  modified: string;
+}
+
+export interface LogRead {
+  path: string;
+  lines: [number, string][];
+  total: number;
+  matched: number;
+  truncated: boolean;
+}
+
+// --- version change ---
+
+export const versionChangeSchema = z.object({
+  type: z.enum(["VANILLA", "PAPER", "PURPUR", "FABRIC", "FORGE", "NEOFORGE"]),
+  version: z.string().regex(/^(LATEST|\d+\.\d+(?:\.\d+)?)$/),
+});
+
+export interface VersionJob {
+  state: "backing-up" | "applying" | "done" | "failed";
+  from: { type: string; version: string };
+  to: { type: string; version: string };
+  backup?: string;
+  error?: string;
+  startedAt: string;
+}

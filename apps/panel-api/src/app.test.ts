@@ -270,6 +270,16 @@ describe("panel API", () => {
     expect((await app.inject({ url: "/api/servers/pw/schedules", headers: { cookie: bob } })).statusCode).toBe(404);
   });
 
+  it("asks for a stopped server before changing version", async () => {
+    const cookie = await login("admin@example.com", "admin-pass");
+    agent.status = vi.fn(async (id: string) => ({ id, state: "running" })) as never;
+    const res = await app.inject({ method: "POST", url: "/api/servers/pw/version", headers: { cookie, ...H }, payload: { type: "PAPER", version: "1.21.5" } });
+    expect(res.statusCode).toBe(409);
+    expect(res.json().error).toMatch(/stop the server/);
+    const bad = await app.inject({ method: "POST", url: "/api/servers/pw/version", headers: { cookie, ...H }, payload: { type: "SPIGOT", version: "1.21.5" } });
+    expect(bad.statusCode).toBe(400);
+  });
+
   it("logs out", async () => {
     const cookie = await login("admin@example.com", "admin-pass");
     await app.inject({ method: "POST", url: "/api/auth/logout", headers: { cookie, ...H } });

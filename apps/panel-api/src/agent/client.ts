@@ -1,7 +1,7 @@
 import type { Readable } from "node:stream";
 import { Agent, request } from "undici";
 import WebSocket from "ws";
-import type { BackupEntry, BackupJob, NodeInfo, PlayerAction, PlayersView, PowerAction, ServerInfo, ServerSample, ServerSpec, ServerStats, ServerStatus } from "@gamepanel/shared";
+import type { BackupEntry, BackupJob, LogFile, LogRead, PluginItem, PluginUpdate, NodeInfo, PlayerAction, PlayersView, PowerAction, ServerInfo, ServerSample, ServerSpec, ServerStats, ServerStatus } from "@gamepanel/shared";
 
 // Talking to one node's agent. TLS trusts only that node's own certificate,
 // and every call carries the node's token.
@@ -58,6 +58,12 @@ export class AgentClient {
   node = () => this.call<NodeInfo>("GET", "/v1/node");
   list = () => this.call<ServerStatus[]>("GET", "/v1/servers");
   status = (id: string) => this.call<ServerStatus>("GET", `/v1/servers/${id}`);
+  plugins = (id: string, folder: string) => this.call<PluginItem[]>("GET", `/v1/servers/${id}/plugins?folder=${folder}`);
+  setPluginEnabled = (id: string, folder: string, file: string, on: boolean) => this.call<{ file: string }>("POST", `/v1/servers/${id}/plugins/enabled?folder=${folder}`, { file, on });
+  installPlugin = (id: string, folder: string, u: PluginUpdate) => this.call<{ file: string; bytes: number }>("POST", `/v1/servers/${id}/plugins/install?folder=${folder}`, u);
+  logs = (id: string) => this.call<LogFile[]>("GET", `/v1/servers/${id}/logs`);
+  readLog = (id: string, path: string, search: string) =>
+    this.call<LogRead>("GET", `/v1/servers/${id}/logs/read?${this.qs({ path, ...(search ? { search } : {}) })}`);
   backups = (id: string) => this.call<{ backups: BackupEntry[]; jobs: BackupJob[] }>("GET", `/v1/servers/${id}/backups`);
   startBackup = (id: string, reason: "manual" | "schedule", keep: number) => this.call<BackupJob>("POST", `/v1/servers/${id}/backups`, { reason, keep });
   restoreBackup = (id: string, name: string) => this.call<BackupJob>("POST", `/v1/servers/${id}/backups/restore`, { name });

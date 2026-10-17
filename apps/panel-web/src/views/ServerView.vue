@@ -3,7 +3,7 @@ import { computed, defineAsyncComponent, onMounted, onUnmounted, ref } from "vue
 import type { PowerAction, ServerView } from "@gamepanel/shared";
 import { api } from "../api.js";
 import ConsolePanel from "../components/ConsolePanel.vue";
-import { Archive, ArrowLeft, CalendarClock, FolderOpen, LayoutDashboard, Play, RotateCw, Skull, SlidersHorizontal, Square, Terminal, Users } from "lucide-vue-next";
+import { Archive, ArrowLeft, CalendarClock, FolderOpen, Puzzle, ScrollText, LayoutDashboard, Play, RotateCw, Skull, SlidersHorizontal, Square, Terminal, Users } from "lucide-vue-next";
 import OverviewPanel from "../components/OverviewPanel.vue";
 import PlayersPanel from "../components/PlayersPanel.vue";
 import { stateOf, uptime } from "../format.js";
@@ -20,12 +20,15 @@ const FilesPanel = defineAsyncComponent(() => import("../components/FilesPanel.v
 const SettingsPanel = defineAsyncComponent(() => import("../components/SettingsPanel.vue"));
 const BackupsPanel = defineAsyncComponent(() => import("../components/BackupsPanel.vue"));
 const SchedulesPanel = defineAsyncComponent(() => import("../components/SchedulesPanel.vue"));
+const PluginsPanel = defineAsyncComponent(() => import("../components/PluginsPanel.vue"));
+const LogsPanel = defineAsyncComponent(() => import("../components/LogsPanel.vue"));
+const VersionPanel = defineAsyncComponent(() => import("../components/VersionPanel.vue"));
 
 // Tabs; the choice is kept in the address (#files) so a reload stays put.
-const tabs = ["overview", "console", "players", "settings", "files", "backups", "schedules"] as const;
+const tabs = ["overview", "console", "players", "plugins", "files", "backups", "schedules", "logs", "settings"] as const;
 type Tab = (typeof tabs)[number];
 const tab = ref<Tab>(tabs.includes(location.hash.slice(1) as Tab) ? (location.hash.slice(1) as Tab) : "overview");
-const tabIcon = { overview: LayoutDashboard, console: Terminal, players: Users, settings: SlidersHorizontal, files: FolderOpen, backups: Archive, schedules: CalendarClock } as const;
+const tabIcon = { overview: LayoutDashboard, console: Terminal, players: Users, settings: SlidersHorizontal, files: FolderOpen, backups: Archive, schedules: CalendarClock, plugins: Puzzle, logs: ScrollText } as const;
 function pick(t: Tab) {
   tab.value = t;
   history.replaceState(null, "", `#${t}`);
@@ -105,6 +108,9 @@ async function power(action: PowerAction) {
 
       <ConsolePanel v-if="tab === 'console'" :id="server.id" class="panel" />
       <PlayersPanel v-if="tab === 'players'" :id="server.id" />
+      <VersionPanel v-if="tab === 'settings'" :id="server.id" :type="server.type" :version="server.version" :running="isUp" @changed="load" />
+      <PluginsPanel v-if="tab === 'plugins'" :id="server.id" :running="isUp" />
+      <LogsPanel v-if="tab === 'logs'" :id="server.id" />
       <SettingsPanel v-if="tab === 'settings'" :id="server.id" :running="isUp" @restarted="load" />
       <BackupsPanel v-if="tab === 'backups'" :id="server.id" :running="isUp" @changed="load" />
       <SchedulesPanel v-if="tab === 'schedules'" :id="server.id" />
