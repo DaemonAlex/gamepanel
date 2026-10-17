@@ -39,6 +39,8 @@ export async function buildApp(token: string, servers: Servers, opts: FastifySer
 
   app.get("/v1/servers", async () => servers.list());
 
+  app.get("/v1/servers/:id/info", async (req) => servers.info(parseId(req.params)));
+
   app.get("/v1/servers/:id/stats", async (req, reply) => {
     const id = parseId(req.params);
     const status = await servers.status(id);

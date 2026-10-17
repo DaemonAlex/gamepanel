@@ -4,8 +4,11 @@ import { cpus, totalmem } from "node:os";
 import { dirname } from "node:path";
 import { PassThrough, type Readable } from "node:stream";
 import Docker from "dockerode";
-import type { NodeInfo, PowerAction, ServerId, ServerSpec, ServerState, ServerStats, ServerStatus } from "@gamepanel/shared";
+import type { NodeInfo, PowerAction, ServerId, ServerInfo, ServerSpec, ServerState, ServerStats, ServerStatus } from "@gamepanel/shared";
+import { readFile } from "node:fs/promises";
 import { ServerFiles } from "./files.js";
+import { folderBytes, listJars, parseProperties } from "./info.js";
+import { parseList, parseMspt, parseTps, rcon } from "./rcon.js";
 import { chownTree, detect, extractArchive, findLayout, fixServerPropertiesFile, type ArchiveFormat, type Detected } from "./import.js";
 import type { AgentConfig } from "./config.js";
 import { buildCreateOptions, containerName, imageFor, LABEL, MC_UID, rconPasswordFile, serverDir, STOP_TIMEOUT_S } from "./containers.js";
@@ -196,6 +199,79 @@ export class Servers {
   // File access for one server's folder. Deletes go to backups/trash/<id>.
   files(id: ServerId): ServerFiles {
     return new ServerFiles(serverDir(this.cfg, id), `${this.cfg.backupRoot}/trash/${id}`, MC_UID);
+  }
+
+  // Everything the Overview shows. Slow parts (folder sizes, jars) are cached.
+  async info(id: ServerId): Promise<ServerInfo> {
+    const files = this.files(id);
+    const dir = serverDir(this.cfg, id);
+    const props = parseProperties(await files.readText("server.properties").catch(() => ""));
+
+    let build: string | null = null;
+    try {
+      build = (JSON.parse(await files.readText("version_history.json")) as { currentVersion?: string }).currentVersion ?? null;
+    } catch {
+      // Only Paper and Purpur write this file.
+    }
+
+    const top = await files.list("").catch(() => []);
+    const worlds: ServerInfo["worlds"] = [];
+    for (const e of top) {
+      if (e.type !== "dir") continue;
+      const isWorld = await files.safeFile(`${e.name}/level.dat`).then(() => true).catch(() => false);
+      if (isWorld) worlds.push({ name: e.name, bytes: await folderBytes(`${dir}/${e.name}`) });
+    }
+
+    let image: string | null = null;
+    let restartCount = 0;
+    let lastExit: ServerInfo["lastExit"] = null;
+    let running = false;
+    let ip: string | null = null;
+    try {
+      const c = await this.docker.getContainer(containerName(id)).inspect();
+      image = c.Config.Image;
+      restartCount = c.RestartCount ?? 0;
+      running = c.State.Running;
+      if (c.State.FinishedAt && !c.State.FinishedAt.startsWith("0001")) {
+        lastExit = { code: c.State.ExitCode, at: c.State.FinishedAt, oomKilled: c.State.OOMKilled };
+      }
+      ip = c.NetworkSettings.Networks[this.cfg.network]?.IPAddress || null;
+    } catch (err) {
+      if (!isNotFound(err)) throw err;
+    }
+
+    return {
+      properties: props,
+      build,
+      java: image?.match(/java(\d+)/)?.[1] ?? null,
+      image,
+      restartCount,
+      lastExit,
+      worlds: worlds.sort((a, b) => b.bytes - a.bytes),
+      diskBytes: await folderBytes(dir),
+      plugins: await listJars(files, "plugins"),
+      mods: await listJars(files, "mods"),
+      live: running && ip ? await this.live(id, ip) : null,
+    };
+  }
+
+  // TPS, tick time and the player list over RCON. Missing commands just come back null.
+  private async live(id: ServerId, ip: string): Promise<ServerInfo["live"]> {
+    try {
+      const password = (await readFile(rconPasswordFile(this.cfg, id), "utf8")).trim();
+      // minecraft:list skips plugins (like Essentials) that replace "list".
+      const [tps, mspt, list] = await rcon(ip, 25575, password, ["tps", "mspt", "minecraft:list uuids"]);
+      const players = parseList(list ?? "");
+      return {
+        tps: parseTps(tps ?? ""),
+        msptAvg: parseMspt(mspt ?? ""),
+        players: players?.players ?? [],
+        online: players?.online ?? 0,
+        max: players?.max ?? 0,
+      };
+    } catch {
+      return null;
+    }
   }
 
   // Every game server container on this node, by label.

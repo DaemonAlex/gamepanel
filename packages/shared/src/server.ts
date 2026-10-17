@@ -61,3 +61,27 @@ export interface NodeInfo {
   disk: { totalBytes: number; freeBytes: number };
   servers: { total: number; running: number; allocatedMemoryBytes: number };
 }
+
+// Everything the Overview shows about one server.
+export interface ServerInfo {
+  // From server.properties.
+  properties: Record<string, string>;
+  // Exact build when the server records one (Paper/Purpur), e.g. "1.21.4-232-...".
+  build: string | null;
+  java: string | null;
+  image: string | null;
+  restartCount: number;
+  lastExit: { code: number; at: string; oomKilled: boolean } | null;
+  worlds: { name: string; bytes: number }[];
+  diskBytes: number;
+  plugins: { file: string; name: string; version: string }[];
+  mods: { file: string; name: string; version: string }[];
+  // Only while running and answering RCON.
+  live: {
+    tps: [number, number, number] | null;
+    msptAvg: number | null;
+    players: { name: string; uuid: string | null }[];
+    online: number;
+    max: number;
+  } | null;
+}

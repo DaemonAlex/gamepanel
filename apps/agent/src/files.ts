@@ -84,6 +84,13 @@ export class ServerFiles {
     return path;
   }
 
+  // The real path of an existing file inside the folder, for read-only use by the agent.
+  async safeFile(rel: string): Promise<string> {
+    const path = await this.existing(rel);
+    if (!(await stat(path)).isFile()) throw new FileError("not a file");
+    return path;
+  }
+
   async list(rel: string): Promise<Entry[]> {
     const dir = await this.existing(rel);
     if (!(await stat(dir)).isDirectory()) throw new FileError("not a folder");

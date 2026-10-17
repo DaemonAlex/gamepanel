@@ -60,6 +60,8 @@ export function buildCreateOptions(cfg: AgentConfig, spec: ServerSpec): Containe
     // Lets the agent send console commands with mc-send-to-console.
     "CREATE_CONSOLE_IN_PIPE=true",
     `RCON_PASSWORD_FILE=${RCON_FILE_IN_CONTAINER}`,
+    // The panel polls over RCON; without this every poll shows up in ops' chat.
+    "BROADCAST_RCON_TO_OPS=false",
     `STOP_DURATION=${STOP_DURATION_S}`,
     // The agent creates the folder already owned by MC_UID.
     "SKIP_CHOWN_DATA=true",

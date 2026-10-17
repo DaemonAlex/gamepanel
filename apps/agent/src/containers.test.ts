@@ -76,6 +76,7 @@ describe("buildCreateOptions", () => {
   it("accepts the EULA only through the spec and reads RCON from a read-only file", () => {
     expect(o.Env).toContain("EULA=TRUE");
     expect(o.Env).toContain("RCON_PASSWORD_FILE=/run/gp/rcon-password");
+    expect(o.Env).toContain("BROADCAST_RCON_TO_OPS=false");
     expect(h.Binds).toContain("/srv/gamepanel/secrets/homeworld/rcon-password:/run/gp/rcon-password:ro");
   });
 
