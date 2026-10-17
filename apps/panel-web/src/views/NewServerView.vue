@@ -2,6 +2,7 @@
 import { computed, ref } from "vue";
 import { useRouter } from "vue-router";
 import type { ServerType } from "@gamepanel/shared";
+import { ArrowLeft, Rocket } from "lucide-vue-next";
 import { api } from "../api.js";
 
 const types: { value: ServerType; label: string; note: string }[] = [
@@ -56,7 +57,7 @@ async function create() {
 <template>
   <main class="wrap">
     <div>
-      <RouterLink to="/" class="label">&larr; All servers</RouterLink>
+      <RouterLink to="/" class="label"><ArrowLeft />All servers</RouterLink>
       <h1>New server</h1>
       <p class="muted">It gets the next free port and starts right away. First start downloads the game, so give it a minute.</p>
     </div>
@@ -108,7 +109,7 @@ async function create() {
 
       <p v-if="error" class="error" role="alert">{{ error }}</p>
       <div class="row">
-        <button class="btn gold" type="submit" :disabled="busy || !name.trim() || !eula">{{ busy ? "Placing waypoint" : "Create and start" }}</button>
+        <button class="btn gold" type="submit" :disabled="busy || !name.trim() || !eula"><Rocket /> {{ busy ? "Placing waypoint" : "Create and start" }}</button>
         <RouterLink to="/" class="btn">Cancel</RouterLink>
       </div>
     </form>

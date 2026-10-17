@@ -3,6 +3,7 @@ import { computed, defineAsyncComponent, onMounted, onUnmounted, ref } from "vue
 import type { PowerAction, ServerView } from "@gamepanel/shared";
 import { api } from "../api.js";
 import ConsolePanel from "../components/ConsolePanel.vue";
+import { ArrowLeft, FolderOpen, LayoutDashboard, Play, RotateCw, Skull, SlidersHorizontal, Square, Terminal, Users } from "lucide-vue-next";
 import OverviewPanel from "../components/OverviewPanel.vue";
 import PlayersPanel from "../components/PlayersPanel.vue";
 import { stateOf, uptime } from "../format.js";
@@ -22,6 +23,7 @@ const SettingsPanel = defineAsyncComponent(() => import("../components/SettingsP
 const tabs = ["overview", "console", "players", "settings", "files"] as const;
 type Tab = (typeof tabs)[number];
 const tab = ref<Tab>(tabs.includes(location.hash.slice(1) as Tab) ? (location.hash.slice(1) as Tab) : "overview");
+const tabIcon = { overview: LayoutDashboard, console: Terminal, players: Users, settings: SlidersHorizontal, files: FolderOpen } as const;
 function pick(t: Tab) {
   tab.value = t;
   history.replaceState(null, "", `#${t}`);
@@ -62,7 +64,7 @@ async function power(action: PowerAction) {
 
 <template>
   <main class="wrap">
-    <RouterLink to="/" class="label">&larr; All servers</RouterLink>
+    <RouterLink to="/" class="label"><ArrowLeft />All servers</RouterLink>
     <p v-if="error" class="error" role="alert">{{ error }}</p>
 
     <template v-if="server">
@@ -79,11 +81,11 @@ async function power(action: PowerAction) {
       </section>
 
       <section class="panel row">
-        <button class="btn gold" type="button" :disabled="isUp || !!busy" @click="power('start')">Start</button>
-        <button class="btn" type="button" :disabled="!isUp || !!busy" @click="power('stop')">Stop</button>
-        <button class="btn" type="button" :disabled="!isUp || !!busy" @click="power('restart')">Restart</button>
+        <button class="btn gold" type="button" :disabled="isUp || !!busy" @click="power('start')"><Play /> Start</button>
+        <button class="btn" type="button" :disabled="!isUp || !!busy" @click="power('stop')"><Square /> Stop</button>
+        <button class="btn" type="button" :disabled="!isUp || !!busy" @click="power('restart')"><RotateCw /> Restart</button>
         <template v-if="!confirmKill">
-          <button class="btn danger" type="button" :disabled="!isUp || !!busy" @click="confirmKill = true">Kill</button>
+          <button class="btn danger" type="button" :disabled="!isUp || !!busy" @click="confirmKill = true"><Skull /> Kill</button>
         </template>
         <template v-else>
           <span>Kill skips saving the world. Sure?</span>
@@ -94,7 +96,7 @@ async function power(action: PowerAction) {
       </section>
 
       <nav class="tabs" role="tablist" aria-label="Server sections">
-        <button v-for="t in tabs" :key="t" type="button" role="tab" :aria-selected="tab === t" :class="{ on: tab === t }" @click="pick(t)">{{ t }}</button>
+        <button v-for="t in tabs" :key="t" type="button" role="tab" :aria-selected="tab === t" :class="{ on: tab === t }" @click="pick(t)"><component :is="tabIcon[t]" /> {{ t }}</button>
       </nav>
 
       <OverviewPanel v-if="tab === 'overview'" :server="server" />
@@ -120,7 +122,7 @@ async function power(action: PowerAction) {
 .num { font: 900 26px var(--font); font-variant-numeric: tabular-nums; margin: 4px 0 6px !important; }
 .small { font-size: 13px; }
 .tabs { display: flex; gap: 4px; flex-wrap: wrap; border-bottom: 1px solid var(--line); }
-.tabs button { font: 600 13px var(--mono); letter-spacing: 0.06em; text-transform: uppercase; padding: 8px 14px; background: transparent; color: var(--ink2); border: 1px solid transparent; border-bottom: 0; cursor: pointer; }
+.tabs button { display: inline-flex; align-items: center; gap: 6px; font: 600 13px var(--mono); letter-spacing: 0.06em; text-transform: uppercase; padding: 8px 14px; background: transparent; color: var(--ink2); border: 1px solid transparent; border-bottom: 0; cursor: pointer; }
 .tabs button.on { background: var(--gold); color: var(--sea); }
 .tabs button:focus-visible { outline: 2px solid var(--gold); outline-offset: 2px; }
 </style>

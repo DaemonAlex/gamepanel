@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from "vue";
 import { managedProperties, propertyFields, propertyGroups } from "@gamepanel/shared";
+import { Gamepad2, Globe, Lock, RotateCw, Save, Settings2, Undo2, Users, Wrench } from "lucide-vue-next";
 import { api } from "../api.js";
 
 const props = defineProps<{ id: string; running: boolean }>();
@@ -27,6 +28,7 @@ const fieldsIn = (g: string) => propertyFields.filter((f) => f.group === g);
 const others = computed(() =>
   Object.entries(saved.value).filter(([k]) => !propertyFields.some((f) => f.key === k)).sort(([a], [b]) => a.localeCompare(b)),
 );
+const groupIcon: Record<string, unknown> = { General: Settings2, Gameplay: Gamepad2, World: Globe, Players: Users, Advanced: Wrench };
 const isManaged = (k: string) => (managedProperties as readonly string[]).includes(k);
 
 async function save() {
@@ -91,18 +93,18 @@ const motdParts = computed(() => {
     <p v-if="error" class="error" role="alert">{{ error }}</p>
     <div v-if="notice" class="panel notice row" role="status">
       <span class="grow">{{ notice }}</span>
-      <button v-if="needRestart && running" class="btn gold" type="button" :disabled="busy" @click="restart">Restart now</button>
+      <button v-if="needRestart && running" class="btn gold" type="button" :disabled="busy" @click="restart"><RotateCw /> Restart now</button>
       <span v-else-if="needRestart" class="muted">Applies next time it starts.</span>
     </div>
 
     <form class="groups" @submit.prevent="save">
       <fieldset v-for="g in propertyGroups" :key="g" class="panel group">
-        <legend class="label">{{ g }}</legend>
+        <legend class="label"><component :is="groupIcon[g]" />{{ g }}</legend>
         <div v-if="g === 'General'" class="motd-preview" aria-label="How the MOTD looks in the server list">
           <span v-for="(p, i) in motdParts" :key="i" :style="{ color: p.color, fontWeight: p.bold ? 700 : 400, fontStyle: p.italic ? 'italic' : 'normal' }">{{ p.text }}</span>
           <span v-if="!motdParts.length" class="muted">A Minecraft Server</span>
         </div>
-        <div v-for="f in fieldsIn(g)" :key="f.key" class="field" :class="{ changed: changed.includes(f.key) }">
+        <div v-for="f in fieldsIn(g)" :key="f.key" class="field" :class="{ changed: changed.includes(f.key), wide: f.type === 'text' }">
           <label :for="`p-${f.key}`">{{ f.label }}</label>
           <template v-if="f.type === 'bool'">
             <button
@@ -127,13 +129,13 @@ const motdParts = computed(() => {
 
       <div class="savebar row">
         <span class="muted">{{ changed.length ? `${changed.length} unsaved change${changed.length === 1 ? "" : "s"}` : "No changes" }}</span>
-        <button class="btn" type="button" :disabled="!changed.length || busy" @click="draft = { ...saved }">Undo changes</button>
-        <button class="btn gold" type="submit" :disabled="!changed.length || busy">{{ busy ? "Saving" : "Save settings" }}</button>
+        <button class="btn" type="button" :disabled="!changed.length || busy" @click="draft = { ...saved }"><Undo2 /> Undo changes</button>
+        <button class="btn gold" type="submit" :disabled="!changed.length || busy"><Save /> {{ busy ? "Saving" : "Save settings" }}</button>
       </div>
     </form>
 
     <details class="panel">
-      <summary class="label">Everything else in server.properties ({{ others.length }})</summary>
+      <summary class="label"><Lock />Everything else in server.properties ({{ others.length }})</summary>
       <dl class="others">
         <div v-for="[k, v] in others" :key="k">
           <dt class="mono">{{ k }}<span v-if="isManaged(k)" class="tag">set by the panel</span></dt>
@@ -149,19 +151,20 @@ const motdParts = computed(() => {
 .settings { display: flex; flex-direction: column; gap: 14px; }
 .notice { margin: 0; border-left: 4px solid var(--gold); }
 .grow { flex: 1; min-width: 0; }
-.groups { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 14px; align-items: start; }
-.group { margin: 0; display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+.groups { columns: 3 320px; column-gap: 14px; }
+.group { margin: 0 0 14px; display: flex; flex-direction: column; gap: 12px; min-width: 0; break-inside: avoid; }
 .group legend { padding: 0 6px; }
 .motd-preview { background: #1b1b1b; border: 1px solid #000; padding: 10px; font: 15px var(--mono); min-height: 1.5em; overflow-wrap: anywhere; }
 .field { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 160px); gap: 4px 12px; align-items: center; padding-left: 8px; border-left: 3px solid transparent; }
 .field.changed { border-left-color: var(--gold); }
+.field.wide { grid-template-columns: 1fr; }
 .field label { font-size: 15px; }
 .field input, .field select { padding: 6px 8px; }
 .help { grid-column: 1 / -1; font-size: 13px; margin: 0; }
 .switch { font: 700 13px var(--font); border: 1px solid var(--line); background: var(--abyss); color: var(--ink2); padding: 6px 10px; cursor: pointer; text-align: center; }
 .switch[aria-checked="true"] { background: var(--ok); color: var(--sea); border-color: var(--ok); }
 .switch:focus-visible { outline: 2px solid var(--gold); outline-offset: 2px; }
-.savebar { grid-column: 1 / -1; justify-content: flex-end; position: sticky; bottom: 0; background: var(--deep); border: 1px solid var(--line); padding: 10px 12px; }
+.savebar { column-span: all; justify-content: flex-end; position: sticky; bottom: 0; background: var(--deep); border: 1px solid var(--line); padding: 10px 12px; }
 .others { margin: 10px 0 0; display: flex; flex-direction: column; }
 .others div { display: flex; justify-content: space-between; gap: 12px; padding: 4px 0; border-top: 1px solid var(--line-soft); font-size: 13px; }
 .others dd { margin: 0; text-align: right; overflow-wrap: anywhere; min-width: 0; color: var(--ink2); }

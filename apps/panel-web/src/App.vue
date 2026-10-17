@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { useRouter } from "vue-router";
+import { LogOut, UserRound } from "lucide-vue-next";
 import { session } from "./session.js";
 
 const router = useRouter();
@@ -16,8 +17,8 @@ async function logout() {
       <span>Daemon&rsquo;s Game Panel</span>
     </RouterLink>
     <span class="label coords" aria-hidden="true">X 0 &middot; Z 0</span>
-    <RouterLink to="/account" class="who muted">{{ session.me.value.email }} &middot; {{ session.me.value.role }}</RouterLink>
-    <button class="btn" type="button" @click="logout">Log out</button>
+    <RouterLink to="/account" class="who muted"><UserRound class="ic-gold" /> {{ session.me.value.email }} &middot; {{ session.me.value.role }}</RouterLink>
+    <button class="btn" type="button" @click="logout"><LogOut /> Log out</button>
   </header>
   <RouterView />
 </template>
@@ -30,6 +31,6 @@ async function logout() {
 }
 .brand { display: flex; align-items: center; gap: 12px; color: var(--ink); text-decoration: none; font: 900 18px var(--font); }
 .coords { flex: 1; }
-.who { font-size: 14px; overflow-wrap: anywhere; }
+.who { font-size: 14px; overflow-wrap: anywhere; display: inline-flex; align-items: center; gap: 6px; text-decoration: none; }
 @media (max-width: 560px) { .coords { display: none; } .who { flex: 1; } }
 </style>
