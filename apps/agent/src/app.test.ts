@@ -16,6 +16,7 @@ const fake = {
   }),
   power: vi.fn(async (id: string) => ({ id, state: "running" })),
   removeContainer: vi.fn(async () => {}),
+  sendCommand: vi.fn(async () => {}),
 };
 
 let app: FastifyInstance;
@@ -76,6 +77,17 @@ describe("agent API", () => {
 
   it("refuses an unknown power action", async () => {
     const res = await app.inject({ method: "POST", url: "/v1/servers/homeworld/power", headers: auth, payload: { action: "explode" } });
+    expect(res.statusCode).toBe(400);
+  });
+
+  it("sends one command over HTTP", async () => {
+    const res = await app.inject({ method: "POST", url: "/v1/servers/homeworld/command", headers: auth, payload: { cmd: "say hi" } });
+    expect(res.statusCode).toBe(204);
+    expect(fake.sendCommand).toHaveBeenCalledWith("homeworld", "say hi");
+  });
+
+  it("refuses a command with a newline over HTTP too", async () => {
+    const res = await app.inject({ method: "POST", url: "/v1/servers/homeworld/command", headers: auth, payload: { cmd: "say a\nop x" } });
     expect(res.statusCode).toBe(400);
   });
 });

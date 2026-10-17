@@ -1,9 +1,10 @@
 import { randomBytes } from "node:crypto";
-import { chown, mkdir, rename, rm, stat, writeFile } from "node:fs/promises";
+import { chown, mkdir, rename, rm, stat, statfs, writeFile } from "node:fs/promises";
+import { cpus, totalmem } from "node:os";
 import { dirname } from "node:path";
 import { PassThrough, type Readable } from "node:stream";
 import Docker from "dockerode";
-import type { PowerAction, ServerId, ServerSpec, ServerState, ServerStatus } from "@gamepanel/shared";
+import type { NodeInfo, PowerAction, ServerId, ServerSpec, ServerState, ServerStats, ServerStatus } from "@gamepanel/shared";
 import { chownTree, detect, extractArchive, findLayout, fixServerPropertiesFile, type ArchiveFormat, type Detected } from "./import.js";
 import type { AgentConfig } from "./config.js";
 import { buildCreateOptions, containerName, imageFor, LABEL, MC_UID, rconPasswordFile, serverDir, STOP_TIMEOUT_S } from "./containers.js";
@@ -189,6 +190,77 @@ export class Servers {
     } finally {
       await rm(staging, { recursive: true, force: true });
     }
+  }
+
+  // Every game server container on this node, by label.
+  async list(): Promise<ServerStatus[]> {
+    const found = await this.docker.listContainers({ all: true, filters: { label: [LABEL] } });
+    const ids = found.map((c) => c.Labels[LABEL]).filter((id): id is string => !!id && id !== "network");
+    return Promise.all(ids.map((id) => this.status(id)));
+  }
+
+  async nodeInfo(): Promise<NodeInfo> {
+    const fs = await statfs(this.cfg.dataRoot);
+    const found = await this.docker.listContainers({ all: true, filters: { label: [LABEL] } });
+    let allocated = 0;
+    for (const c of found) {
+      const info = await this.docker.getContainer(c.Id).inspect();
+      allocated += info.HostConfig.Memory ?? 0;
+    }
+    return {
+      memoryBytes: totalmem(),
+      cpus: cpus().length,
+      disk: { totalBytes: fs.blocks * fs.bsize, freeBytes: fs.bavail * fs.bsize },
+      servers: { total: found.length, running: found.filter((c) => c.State === "running").length, allocatedMemoryBytes: allocated },
+    };
+  }
+
+  // CPU and memory from Docker, players from a status ping inside the container.
+  async stats(id: ServerId): Promise<ServerStats> {
+    const c = this.docker.getContainer(containerName(id));
+    const s = (await c.stats({ stream: false })) as Docker.ContainerStats;
+    const cpuDelta = s.cpu_stats.cpu_usage.total_usage - s.precpu_stats.cpu_usage.total_usage;
+    const sysDelta = (s.cpu_stats.system_cpu_usage ?? 0) - (s.precpu_stats.system_cpu_usage ?? 0);
+    const online = s.cpu_stats.online_cpus ?? 1;
+    const cache = (s.memory_stats.stats as Record<string, number> | undefined)?.inactive_file ?? 0;
+
+    let players: ServerStats["players"] = null;
+    let version: string | null = null;
+    try {
+      const out = await this.execCapture(id, ["mc-monitor", "status", "--json", "--timeout", "3s"]);
+      const ping = JSON.parse(out) as { server_info?: { version?: { name?: string }; players?: { online?: number; max?: number; Sample?: { name: string }[] | null } } };
+      const p = ping.server_info?.players;
+      if (p) players = { online: p.online ?? 0, max: p.max ?? 0, names: (p.Sample ?? []).map((x) => x.name) };
+      version = ping.server_info?.version?.name ?? null;
+    } catch {
+      // Still starting, or not answering pings.
+    }
+
+    return {
+      cpuPercent: sysDelta > 0 ? Math.round((cpuDelta / sysDelta) * online * 1000) / 10 : 0,
+      memoryBytes: Math.max(0, (s.memory_stats.usage ?? 0) - cache),
+      memoryLimitBytes: s.memory_stats.limit ?? 0,
+      players,
+      version,
+    };
+  }
+
+  // Run a command in the container as the game user and return what it printed.
+  private async execCapture(id: ServerId, cmd: string[]): Promise<string> {
+    const c = this.docker.getContainer(containerName(id));
+    const exec = await c.exec({ Cmd: cmd, User: String(MC_UID), AttachStdout: true, AttachStderr: true });
+    const raw = await exec.start({});
+    const out = new PassThrough();
+    const chunks: Buffer[] = [];
+    out.on("data", (b: Buffer) => chunks.push(b));
+    this.docker.modem.demuxStream(raw, out, new PassThrough());
+    await new Promise<void>((resolve, reject) => {
+      raw.on("end", resolve);
+      raw.on("error", reject);
+    });
+    const result = await exec.inspect();
+    if (result.ExitCode !== 0) throw new Error(`exit ${result.ExitCode}`);
+    return Buffer.concat(chunks).toString("utf8");
   }
 
   // One console command, given to the server as typed. The command is passed as

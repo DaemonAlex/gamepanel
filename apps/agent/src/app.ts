@@ -33,6 +33,17 @@ export async function buildApp(token: string, servers: Servers, opts: FastifySer
 
   app.get("/v1/health", async () => ({ ok: true }));
 
+  app.get("/v1/node", async () => servers.nodeInfo());
+
+  app.get("/v1/servers", async () => servers.list());
+
+  app.get("/v1/servers/:id/stats", async (req, reply) => {
+    const id = parseId(req.params);
+    const status = await servers.status(id);
+    if (status.state !== "running" && status.state !== "starting") return reply.code(409).send({ error: "server is not running" });
+    return servers.stats(id);
+  });
+
   app.get("/v1/servers/:id", async (req) => servers.status(parseId(req.params)));
 
   app.put("/v1/servers/:id", async (req, reply) => {
@@ -56,6 +67,14 @@ export async function buildApp(token: string, servers: Servers, opts: FastifySer
     const format = (req.query as { format?: string }).format;
     if (format !== "tar.gz" && format !== "zip") throw new ImportError("format must be tar.gz or zip");
     return servers.importArchive(id, format, req.body as Readable);
+  });
+
+  // One console command without a WebSocket (broadcasts, scheduled tasks).
+  app.post("/v1/servers/:id/command", async (req, reply) => {
+    const id = parseId(req.params);
+    const { cmd } = consoleInSchema.parse({ t: "cmd", ...((req.body ?? {}) as object) });
+    await servers.sendCommand(id, cmd);
+    return reply.code(204).send();
   });
 
   app.delete("/v1/servers/:id", async (req, reply) => {

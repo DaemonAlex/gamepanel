@@ -43,3 +43,21 @@ export interface ServerStatus {
 export const powerActions = ["start", "stop", "restart", "kill"] as const;
 export const powerActionSchema = z.enum(powerActions);
 export type PowerAction = z.infer<typeof powerActionSchema>;
+
+// Live numbers for one running server.
+export interface ServerStats {
+  cpuPercent: number;
+  memoryBytes: number;
+  memoryLimitBytes: number;
+  // From a status ping. Null when the server is not answering yet.
+  players: { online: number; max: number; names: string[] } | null;
+  version: string | null;
+}
+
+// What a node has and what is already promised to servers.
+export interface NodeInfo {
+  memoryBytes: number;
+  cpus: number;
+  disk: { totalBytes: number; freeBytes: number };
+  servers: { total: number; running: number; allocatedMemoryBytes: number };
+}
