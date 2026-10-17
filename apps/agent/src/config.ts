@@ -12,6 +12,9 @@ export interface AgentConfig {
   // e.g. "itzg/minecraft-server" and "2026.9.2". The Java tag is added per server.
   imageRepo: string;
   imageRelease: string;
+  // Old server folders are moved here before an import replaces them. Never deleted.
+  backupRoot: string;
+  importLimits: { maxBytes: number; maxEntries: number };
   network: string;
   // The node address that game ports are published on.
   bindIp: string;
@@ -46,6 +49,11 @@ export function loadConfig(env: Env = process.env): AgentConfig {
     secretsRoot: env.AGENT_SECRETS_ROOT ?? "/srv/gamepanel/secrets",
     imageRepo: env.AGENT_MC_IMAGE_REPO ?? "itzg/minecraft-server",
     imageRelease: required(env, "AGENT_MC_IMAGE_RELEASE"),
+    backupRoot: env.AGENT_BACKUP_ROOT ?? "/srv/gamepanel/backups",
+    importLimits: {
+      maxBytes: Number(env.AGENT_IMPORT_MAX_GIB ?? "50") * 2 ** 30,
+      maxEntries: Number(env.AGENT_IMPORT_MAX_ENTRIES ?? "500000"),
+    },
     network: env.AGENT_MC_NETWORK ?? "gp-net",
     bindIp: required(env, "AGENT_BIND_IP"),
   };

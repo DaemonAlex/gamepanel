@@ -1,8 +1,10 @@
+import type { Readable } from "node:stream";
 import Fastify, { type FastifyInstance, type FastifyServerOptions } from "fastify";
 import websocket from "@fastify/websocket";
 import { ZodError } from "zod";
 import { consoleInSchema, powerActionSchema, serverIdSchema, serverSpecSchema, type ConsoleOut } from "@gamepanel/shared";
 import { tokenMatches } from "./auth.js";
+import { ImportError } from "./import.js";
 import { ConflictError, type Servers } from "./servers.js";
 
 // The agent's HTTP API. Every route needs the bearer token; the panel is the only caller.
@@ -23,6 +25,7 @@ export async function buildApp(token: string, servers: Servers, opts: FastifySer
 
   app.setErrorHandler((err, _req, reply) => {
     if (err instanceof ConflictError) return reply.code(409).send({ error: err.message });
+    if (err instanceof ImportError) return reply.code(422).send({ error: err.message });
     if (err instanceof ZodError) return reply.code(400).send({ error: "invalid request" });
     app.log.error(err);
     return reply.code(500).send({ error: "agent error" });
@@ -43,6 +46,16 @@ export async function buildApp(token: string, servers: Servers, opts: FastifySer
     const id = parseId(req.params);
     const { action } = (req.body ?? {}) as { action?: unknown };
     return servers.power(id, powerActionSchema.parse(action));
+  });
+
+  // Uploads arrive as a raw stream; the import code enforces its own size caps.
+  app.addContentTypeParser("application/octet-stream", (_req, payload, done) => done(null, payload));
+
+  app.post("/v1/servers/:id/import", async (req) => {
+    const id = parseId(req.params);
+    const format = (req.query as { format?: string }).format;
+    if (format !== "tar.gz" && format !== "zip") throw new ImportError("format must be tar.gz or zip");
+    return servers.importArchive(id, format, req.body as Readable);
   });
 
   app.delete("/v1/servers/:id", async (req, reply) => {

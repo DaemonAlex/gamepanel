@@ -1,14 +1,33 @@
 import { randomBytes } from "node:crypto";
-import { chown, mkdir, writeFile } from "node:fs/promises";
+import { chown, mkdir, rename, rm, stat, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
 import { PassThrough, type Readable } from "node:stream";
 import Docker from "dockerode";
 import type { PowerAction, ServerId, ServerSpec, ServerState, ServerStatus } from "@gamepanel/shared";
+import { chownTree, detect, extractArchive, findLayout, fixServerPropertiesFile, type ArchiveFormat, type Detected } from "./import.js";
 import type { AgentConfig } from "./config.js";
 import { buildCreateOptions, containerName, imageFor, LABEL, MC_UID, rconPasswordFile, serverDir, STOP_TIMEOUT_S } from "./containers.js";
 
 // The request is fine but the server is in the wrong state for it (HTTP 409).
 export class ConflictError extends Error {}
+
+export interface ImportResult {
+  kind: "server" | "world";
+  worlds: string[];
+  entries: number;
+  // Where the previous folder went, if there was one.
+  backup: string | null;
+  detected: Detected;
+}
+
+async function pathExists(path: string): Promise<boolean> {
+  try {
+    await stat(path);
+    return true;
+  } catch {
+    return false;
+  }
+}
 
 function isNotFound(err: unknown): boolean {
   return typeof err === "object" && err !== null && (err as { statusCode?: number }).statusCode === 404;
@@ -134,6 +153,41 @@ export class Servers {
     raw.on("end", () => out.end());
     out.on("close", () => raw.destroy());
     return out;
+  }
+
+  // Replace the server's folder with an uploaded world or server folder.
+  // The old folder is moved to the backups folder, never deleted.
+  async importArchive(id: ServerId, format: ArchiveFormat, source: Readable): Promise<ImportResult> {
+    const current = await this.status(id);
+    if (current.state !== "missing" && current.state !== "created" && current.state !== "stopped") {
+      throw new ConflictError("stop the server before importing");
+    }
+    const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+    const staging = `${this.cfg.dataRoot}/.import-${id}-${stamp}`;
+    try {
+      const entries = await extractArchive(format, source, staging, `${staging}.upload`, this.cfg.importLimits);
+      const layout = await findLayout(staging);
+      const target = serverDir(this.cfg, id);
+
+      let backup: string | null = null;
+      if (await pathExists(target)) {
+        await mkdir(this.cfg.backupRoot, { recursive: true, mode: 0o750 });
+        backup = `${this.cfg.backupRoot}/${id}-pre-import-${stamp}`;
+        await rename(target, backup);
+      }
+
+      if (layout.kind === "server") {
+        await rename(layout.root, target);
+      } else {
+        await mkdir(target, { recursive: true, mode: 0o750 });
+        await rename(layout.root, `${target}/world`);
+      }
+      await fixServerPropertiesFile(target);
+      await chownTree(target, MC_UID, MC_UID);
+      return { kind: layout.kind, worlds: layout.worlds, entries, backup, detected: await detect(target) };
+    } finally {
+      await rm(staging, { recursive: true, force: true });
+    }
   }
 
   // One console command, given to the server as typed. The command is passed as
