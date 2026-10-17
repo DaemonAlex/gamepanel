@@ -28,6 +28,11 @@ const VersionPanel = defineAsyncComponent(() => import("../components/VersionPan
 const tabs = ["overview", "console", "players", "plugins", "files", "backups", "schedules", "logs", "settings"] as const;
 type Tab = (typeof tabs)[number];
 const tab = ref<Tab>(tabs.includes(location.hash.slice(1) as Tab) ? (location.hash.slice(1) as Tab) : "overview");
+const SharingPanel = defineAsyncComponent(() => import("../components/SharingPanel.vue"));
+// Tabs a subuser was not given are hidden; owners and admins see all.
+const tabPerm: Record<Tab, string | null> = { overview: null, console: "console", players: "players", plugins: "plugins", files: "files", backups: "backups", schedules: "schedules", logs: "logs", settings: "settings" };
+const can = (p: string | null) => !p || !!server.value?.perms.some((x) => x === "all" || x === p);
+const owner = computed(() => !!server.value?.perms.includes("all"));
 const tabIcon = { overview: LayoutDashboard, console: Terminal, players: Users, settings: SlidersHorizontal, files: FolderOpen, backups: Archive, schedules: CalendarClock, plugins: Puzzle, logs: ScrollText } as const;
 function pick(t: Tab) {
   tab.value = t;
@@ -86,11 +91,11 @@ async function power(action: PowerAction) {
       </section>
 
       <section class="panel row">
-        <button class="btn gold" type="button" :disabled="isUp || !!busy" @click="power('start')"><Play /> Start</button>
-        <button class="btn" type="button" :disabled="!isUp || !!busy" @click="power('stop')"><Square /> Stop</button>
-        <button class="btn" type="button" :disabled="!isUp || !!busy" @click="power('restart')"><RotateCw /> Restart</button>
+        <button class="btn gold" type="button" :disabled="isUp || !!busy || !can('power')" @click="power('start')"><Play /> Start</button>
+        <button class="btn" type="button" :disabled="!isUp || !!busy || !can('power')" @click="power('stop')"><Square /> Stop</button>
+        <button class="btn" type="button" :disabled="!isUp || !!busy || !can('power')" @click="power('restart')"><RotateCw /> Restart</button>
         <template v-if="!confirmKill">
-          <button class="btn danger" type="button" :disabled="!isUp || !!busy" @click="confirmKill = true"><Skull /> Kill</button>
+          <button class="btn danger" type="button" :disabled="!isUp || !!busy" @click="confirmKill = true" v-show="can('power')"><Skull /> Kill</button>
         </template>
         <template v-else>
           <span>Kill skips saving the world. Sure?</span>
@@ -101,7 +106,7 @@ async function power(action: PowerAction) {
       </section>
 
       <nav class="tabs" role="tablist" aria-label="Server sections">
-        <button v-for="t in tabs" :key="t" type="button" role="tab" :aria-selected="tab === t" :class="{ on: tab === t }" @click="pick(t)"><component :is="tabIcon[t]" /> {{ t }}</button>
+        <button v-for="t in tabs.filter((x) => can(tabPerm[x]))" :key="t" type="button" role="tab" :aria-selected="tab === t" :class="{ on: tab === t }" @click="pick(t)"><component :is="tabIcon[t]" /> {{ t }}</button>
       </nav>
 
       <OverviewPanel v-if="tab === 'overview'" :server="server" />
@@ -111,6 +116,7 @@ async function power(action: PowerAction) {
       <VersionPanel v-if="tab === 'settings'" :id="server.id" :type="server.type" :version="server.version" :running="isUp" @changed="load" />
       <PluginsPanel v-if="tab === 'plugins'" :id="server.id" :running="isUp" />
       <LogsPanel v-if="tab === 'logs'" :id="server.id" />
+      <SharingPanel v-if="tab === 'settings' && owner" :id="server.id" />
       <SettingsPanel v-if="tab === 'settings'" :id="server.id" :running="isUp" @restarted="load" />
       <BackupsPanel v-if="tab === 'backups'" :id="server.id" :running="isUp" @changed="load" />
       <SchedulesPanel v-if="tab === 'schedules'" :id="server.id" />

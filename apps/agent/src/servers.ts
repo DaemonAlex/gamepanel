@@ -8,6 +8,7 @@ import { checkProperty } from "@gamepanel/shared";
 import type { NodeInfo, PlayerAction, PlayersView, PowerAction, ServerId, ServerInfo, ServerSample, ServerSpec, ServerState, ServerStats, ServerStatus } from "@gamepanel/shared";
 import { readFile } from "node:fs/promises";
 import { Backups, LocalStore } from "./backups.js";
+import { Quotas } from "./quota.js";
 import { FileError, ServerFiles } from "./files.js";
 import { folderBytes, listJars } from "./info.js";
 import { commandFor, readPlayerFiles } from "./players.js";
@@ -53,6 +54,7 @@ function stateFrom(info: Docker.ContainerInspectInfo): ServerState {
 
 export class Servers {
   readonly backups: Backups;
+  readonly quotas: Quotas;
   // One kept-open RCON connection per server (new connections spam the server log).
   private readonly rconPool = new RconPool();
 
@@ -60,6 +62,7 @@ export class Servers {
     private readonly cfg: AgentConfig,
     private readonly docker: Docker = new Docker(),
   ) {
+    this.quotas = new Quotas(cfg.dataRoot.replace(/\/servers$/, ""));
     this.backups = new Backups(new LocalStore(`${cfg.backupRoot}/archives`), {
       serverDir: (id) => serverDir(cfg, id),
       dataRoot: cfg.dataRoot,
@@ -70,6 +73,7 @@ export class Servers {
       },
       rcon: (id, commands) => this.rconRun(id, commands),
       uid: MC_UID,
+      afterRestore: (id) => this.quotas.reapply(id, serverDir(cfg, id)),
     });
   }
 
@@ -125,6 +129,7 @@ export class Servers {
     }
     await this.ensureNetwork();
     await this.prepareFiles(spec.id);
+    if (spec.diskGb) await this.quotas.set(spec.id, serverDir(this.cfg, spec.id), spec.diskGb);
     await this.pullIfMissing(imageFor(this.cfg, spec));
     await this.removeContainer(spec.id);
     await this.docker.createContainer(buildCreateOptions(this.cfg, spec));
@@ -211,6 +216,7 @@ export class Servers {
       }
       await fixServerPropertiesFile(target);
       await chownTree(target, MC_UID, MC_UID);
+      await this.quotas.reapply(id, target);
       return { kind: layout.kind, worlds: layout.worlds, entries, backup, detected: await detect(target) };
     } finally {
       await rm(staging, { recursive: true, force: true });
@@ -377,6 +383,11 @@ export class Servers {
     } catch {
       return null;
     }
+  }
+
+  async setDisk(id: ServerId, gb: number) {
+    await this.quotas.set(id, serverDir(this.cfg, id), gb);
+    return this.quotas.usage(id);
   }
 
   // Every game server container on this node, by label.

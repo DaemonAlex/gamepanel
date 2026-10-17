@@ -8,6 +8,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { addressFor, buildApp, slugify } from "./app.js";
 import type { AgentClient } from "./agent/client.js";
 import { hashPassword, seal } from "./auth/crypto.js";
+import { codeAt, base32Decode } from "./auth/totp.js";
 import { schema, type Db } from "./db/index.js";
 import { containerBytesFor, memoryFits, nextFreePort } from "./services/allocation.js";
 import { Nodes } from "./services/nodes.js";
@@ -64,7 +65,7 @@ async function setup(memoryBytes?: number) {
   await migrate(drizzle(pg), { migrationsFolder: fileURLToPath(new URL("../drizzle", import.meta.url)) });
   agent = fakeAgent(memoryBytes);
   const nodes = new Nodes(db, SECRET, () => agent as unknown as AgentClient);
-  app = await buildApp({ cfg: { cookieSecure: true, webDist: null, serverDomain: "mc.example.com" }, db, nodes });
+  app = await buildApp({ cfg: { cookieSecure: true, webDist: null, serverDomain: "mc.example.com", appSecret: SECRET }, db, nodes });
   await db.insert(schema.users).values([
     { id: "admin", email: "admin@example.com", passwordHash: await hashPassword("admin-pass"), role: "admin" },
     { id: "bob", email: "bob@example.com", passwordHash: await hashPassword("bob-pass"), role: "owner" },
@@ -154,11 +155,6 @@ describe("panel API", () => {
     expect(res.statusCode).toBe(409);
   });
 
-  it("only lets admins create servers for now", async () => {
-    const cookie = await login("bob@example.com", "bob-pass");
-    const res = await app.inject({ method: "POST", url: "/api/servers", headers: { cookie, ...H }, payload: newServer });
-    expect(res.statusCode).toBe(403);
-  });
 
   it("removes the row again when the node fails to create the server", async () => {
     const cookie = await login("admin@example.com", "admin-pass");
@@ -284,6 +280,92 @@ describe("panel API", () => {
     const cookie = await login("admin@example.com", "admin-pass");
     await app.inject({ method: "POST", url: "/api/auth/logout", headers: { cookie, ...H } });
     expect((await app.inject({ url: "/api/me", headers: { cookie } })).statusCode).toBe(401);
+  });
+});
+
+describe("people and permissions", () => {
+  beforeEach(() => setup());
+
+  async function invite(adminCookie: string, email: string, role = "owner") {
+    const res = await app.inject({ method: "POST", url: "/api/users/invite", headers: { cookie: adminCookie, ...H }, payload: { email, role } });
+    expect(res.statusCode).toBe(200);
+    return (res.json() as { path: string }).path.split("/").pop()!;
+  }
+
+  it("invites someone who then sets a password and is logged in", async () => {
+    const admin = await login("admin@example.com", "admin-pass");
+    const token = await invite(admin, "friend@example.com");
+    expect((await app.inject({ url: `/api/invite/${token}` })).json()).toEqual({ email: "friend@example.com", kind: "invite" });
+    const short = await app.inject({ method: "POST", url: "/api/invite/accept", headers: H, payload: { token, password: "short" } });
+    expect(short.statusCode).toBe(400);
+    const ok = await app.inject({ method: "POST", url: "/api/invite/accept", headers: H, payload: { token, password: "a-good-long-password" } });
+    expect(ok.statusCode).toBe(200);
+    expect(ok.json()).toMatchObject({ email: "friend@example.com", role: "owner" });
+    // One use only.
+    expect((await app.inject({ method: "POST", url: "/api/invite/accept", headers: H, payload: { token, password: "another-long-password" } })).statusCode).toBe(404);
+    await login("friend@example.com", "a-good-long-password");
+  });
+
+  it("only admins see users and send invites", async () => {
+    const bob = await login("bob@example.com", "bob-pass");
+    expect((await app.inject({ url: "/api/users", headers: { cookie: bob } })).statusCode).toBe(403);
+    expect((await app.inject({ method: "POST", url: "/api/users/invite", headers: { cookie: bob, ...H }, payload: { email: "x@example.com" } })).statusCode).toBe(403);
+  });
+
+  it("gives a subuser exactly the rights the owner chose", async () => {
+    const admin = await login("admin@example.com", "admin-pass");
+    // admin owns pw; share it with bob: console and logs only
+    const share = await app.inject({ method: "PUT", url: "/api/servers/pw/access", headers: { cookie: admin, ...H }, payload: { email: "bob@example.com", perms: ["console", "logs"] } });
+    expect(share.statusCode).toBe(200);
+    const bob = await login("bob@example.com", "bob-pass");
+    const dash = (await app.inject({ url: "/api/dashboard", headers: { cookie: bob } })).json();
+    expect(dash.servers.map((x: { id: string; perms: string[] }) => [x.id, x.perms])).toEqual([["pw", ["console", "logs"]]]);
+    const power = await app.inject({ method: "POST", url: "/api/servers/pw/power", headers: { cookie: bob, ...H }, payload: { action: "stop" } });
+    expect(power.statusCode).toBe(403);
+    expect(agent.power).not.toHaveBeenCalled();
+    // A subuser cannot share further.
+    expect((await app.inject({ url: "/api/servers/pw/access", headers: { cookie: bob } })).statusCode).toBe(403);
+    // Taking access away hides the server again.
+    const list = (await app.inject({ url: "/api/servers/pw/access", headers: { cookie: admin } })).json();
+    await app.inject({ method: "DELETE", url: `/api/servers/pw/access/${list[0].userId}`, headers: { cookie: admin, ...H } });
+    expect((await app.inject({ url: "/api/servers/pw", headers: { cookie: bob } })).statusCode).toBe(404);
+  });
+
+  it("lets owners create servers within their quota", async () => {
+    const bob = await login("bob@example.com", "bob-pass");
+    // default quota: 1 server, 4096 MB, 20 GB
+    const big = await app.inject({ method: "POST", url: "/api/servers", headers: { cookie: bob, ...H }, payload: { ...newServer, memoryMb: 8192 } });
+    expect(big.statusCode).toBe(403);
+    expect(big.json().error).toMatch(/RAM/);
+    const ok = await app.inject({ method: "POST", url: "/api/servers", headers: { cookie: bob, ...H }, payload: newServer });
+    expect(ok.statusCode).toBe(201);
+    const second = await app.inject({ method: "POST", url: "/api/servers", headers: { cookie: bob, ...H }, payload: { ...newServer, name: "Second" } });
+    expect(second.statusCode).toBe(403);
+    expect(second.json().error).toMatch(/limit is 1 server/);
+  });
+
+  it("asks for the authenticator code once two-step login is on", async () => {
+    const admin = await login("admin@example.com", "admin-pass");
+    const setup = (await app.inject({ method: "POST", url: "/api/auth/totp/setup", headers: { cookie: admin, ...H } })).json() as { secret: string; uri: string };
+    expect(setup.uri).toMatch(/^otpauth:\/\/totp\//);
+    const code = () => codeAt(setup.secret, Math.floor(Date.now() / 30_000));
+    expect((await app.inject({ method: "POST", url: "/api/auth/totp/enable", headers: { cookie: admin, ...H }, payload: { code: "000000" } })).statusCode).toBe(400);
+    expect((await app.inject({ method: "POST", url: "/api/auth/totp/enable", headers: { cookie: admin, ...H }, payload: { code: code() } })).statusCode).toBe(200);
+    const noCode = await app.inject({ method: "POST", url: "/api/auth/login", payload: { email: "admin@example.com", password: "admin-pass" } });
+    expect(noCode.statusCode).toBe(401);
+    expect(noCode.json().needCode).toBe(true);
+    const withCode = await app.inject({ method: "POST", url: "/api/auth/login", payload: { email: "admin@example.com", password: "admin-pass", code: code() } });
+    expect(withCode.statusCode).toBe(200);
+    expect(base32Decode(setup.secret).length).toBe(20);
+  });
+
+  it("turning a user off ends their sessions, and admins cannot lock themselves out", async () => {
+    const admin = await login("admin@example.com", "admin-pass");
+    const bob = await login("bob@example.com", "bob-pass");
+    await app.inject({ method: "PUT", url: "/api/users/bob", headers: { cookie: admin, ...H }, payload: { disabled: true } });
+    expect((await app.inject({ url: "/api/me", headers: { cookie: bob } })).statusCode).toBe(401);
+    const self = await app.inject({ method: "PUT", url: "/api/users/admin", headers: { cookie: admin, ...H }, payload: { disabled: true } });
+    expect(self.statusCode).toBe(400);
   });
 });
 

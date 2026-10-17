@@ -9,11 +9,14 @@ export interface Me {
   id: string;
   email: string;
   role: Role;
+  totpEnabled?: boolean;
 }
 
 export const loginSchema = z.object({
   email: z.string().email().max(200),
   password: z.string().min(1).max(500),
+  // Six-digit code from an authenticator app, when two-step login is on.
+  code: z.string().regex(/^\d{6}$/).optional(),
 });
 
 export const changePasswordSchema = z.object({
@@ -27,6 +30,7 @@ export const newServerSchema = z.object({
   version: z.string().regex(/^(LATEST|\d+\.\d+(?:\.\d+)?)$/),
   memoryMb: z.number().int().min(1024).max(16384),
   cpus: z.number().min(0.5).max(8).default(2),
+  diskGb: z.number().int().min(2).max(1000).default(20),
   nodeId: z.string().optional(),
   // The create screen shows the Minecraft EULA; the box must be ticked.
   eulaAccepted: z.literal(true),
@@ -49,8 +53,11 @@ export interface ServerView {
   version: string;
   memoryMb: number;
   cpus: number;
+  diskGb: number;
   port: number;
   publicIp: string;
+  // What the viewer may do here ("all" for owners and admins).
+  perms: string[];
   // What players type: the hostname, or ip:port until DNS is set.
   address: string;
   status: ServerStatus | null;
@@ -220,4 +227,68 @@ export interface VersionJob {
   backup?: string;
   error?: string;
   startedAt: string;
+}
+
+// --- people and access ---
+
+// What a subuser may be allowed on a server. Owners and admins have all of them.
+export const serverPerms = ["console", "power", "players", "files", "plugins", "backups", "schedules", "logs", "settings"] as const;
+export type ServerPerm = (typeof serverPerms)[number];
+export const permLabels: Record<ServerPerm, string> = {
+  console: "Console and commands",
+  power: "Start, stop, restart",
+  players: "Players (kick, ban, op, whitelist)",
+  files: "Files",
+  plugins: "Plugins and mods",
+  backups: "Backups and restore",
+  schedules: "Schedules",
+  logs: "Logs",
+  settings: "Settings and version",
+};
+
+export const inviteSchema = z.object({
+  email: z.string().email().max(200),
+  role: z.enum(["admin", "owner", "subuser"]).default("owner"),
+});
+
+export const acceptInviteSchema = z.object({
+  token: z.string().min(20).max(100),
+  password: z.string().min(12, "use at least 12 characters").max(500),
+});
+
+export const quotaSchema = z.object({
+  maxServers: z.number().int().min(0).max(100),
+  maxMemoryMb: z.number().int().min(0).max(262144),
+  maxDiskGb: z.number().int().min(0).max(10000),
+});
+
+export const accessSchema = z.object({
+  email: z.string().email().max(200),
+  perms: z.array(z.enum(serverPerms)).max(serverPerms.length),
+});
+
+export interface UserView {
+  id: string;
+  email: string;
+  role: Role;
+  disabled: boolean;
+  totpEnabled: boolean;
+  quota: { maxServers: number; maxMemoryMb: number; maxDiskGb: number };
+  usage: { servers: number; memoryMb: number; diskGb: number };
+  createdAt: string;
+}
+
+export interface InviteView {
+  email: string;
+  role: Role;
+  kind: "invite" | "reset";
+  expiresAt: string;
+  usedAt: string | null;
+  createdAt: string;
+}
+
+export interface AccessView {
+  userId: string;
+  email: string;
+  perms: ServerPerm[];
 }

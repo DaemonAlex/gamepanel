@@ -1,4 +1,4 @@
-import type { CatalogHit, LogFile, LogRead, PluginsView, VersionJob, ServerType, BackupJob, BackupsView, ScheduleInput, ScheduleView, Dashboard, Me, MetricPoint, MetricRange, NewServer, NodeMetricPoint, PlayerAction, PlayersView, PowerAction, ServerInfo, ServerView } from "@gamepanel/shared";
+import type { AccessView, InviteView, Role, ServerPerm, UserView, CatalogHit, LogFile, LogRead, PluginsView, VersionJob, ServerType, BackupJob, BackupsView, ScheduleInput, ScheduleView, Dashboard, Me, MetricPoint, MetricRange, NewServer, NodeMetricPoint, PlayerAction, PlayersView, PowerAction, ServerInfo, ServerView } from "@gamepanel/shared";
 
 // Talking to the panel API. Every change carries the x-gamepanel header the API requires.
 
@@ -6,6 +6,7 @@ export class ApiError extends Error {
   constructor(
     message: string,
     readonly status: number,
+    readonly data: Record<string, unknown> = {},
   ) {
     super(message);
   }
@@ -20,13 +21,28 @@ async function call<T>(method: string, path: string, body?: unknown): Promise<T>
   });
   const text = await res.text();
   const data = text ? (JSON.parse(text) as unknown) : undefined;
-  if (!res.ok) throw new ApiError((data as { error?: string } | undefined)?.error ?? `request failed (${res.status})`, res.status);
+  if (!res.ok) throw new ApiError((data as { error?: string } | undefined)?.error ?? `request failed (${res.status})`, res.status, (data ?? {}) as Record<string, unknown>);
   return data as T;
 }
 
 export const api = {
   me: () => call<Me>("GET", "/api/me"),
-  login: (email: string, password: string) => call<Me>("POST", "/api/auth/login", { email, password }),
+  login: (email: string, password: string, code?: string) => call<Me>("POST", "/api/auth/login", { email, password, ...(code ? { code } : {}) }),
+  totpSetup: () => call<{ secret: string; uri: string }>("POST", "/api/auth/totp/setup", {}),
+  totpEnable: (code: string) => call<{ ok: true }>("POST", "/api/auth/totp/enable", { code }),
+  totpDisable: (code: string) => call<{ ok: true }>("POST", "/api/auth/totp/disable", { code }),
+  users: () => call<UserView[]>("GET", "/api/users"),
+  invites: () => call<InviteView[]>("GET", "/api/invites"),
+  invite: (email: string, role: Role) => call<{ path: string; expiresAt: string }>("POST", "/api/users/invite", { email, role }),
+  resetLink: (uid: string) => call<{ path: string }>("POST", `/api/users/${encodeURIComponent(uid)}/reset`, {}),
+  updateUser: (uid: string, body: { disabled?: boolean; role?: Role; quota?: { maxServers: number; maxMemoryMb: number; maxDiskGb: number } }) =>
+    call<{ ok: true }>("PUT", `/api/users/${encodeURIComponent(uid)}`, body),
+  inviteInfo: (token: string) => call<{ email: string; kind: string }>("GET", `/api/invite/${encodeURIComponent(token)}`),
+  acceptInvite: (token: string, password: string) => call<Me>("POST", "/api/invite/accept", { token, password }),
+  access: (id: string) => call<AccessView[]>("GET", `/api/servers/${encodeURIComponent(id)}/access`),
+  setAccess: (id: string, email: string, perms: ServerPerm[]) => call<{ ok: true }>("PUT", `/api/servers/${encodeURIComponent(id)}/access`, { email, perms }),
+  removeAccess: (id: string, uid: string) => call<{ ok: true }>("DELETE", `/api/servers/${encodeURIComponent(id)}/access/${encodeURIComponent(uid)}`),
+  setDisk: (id: string, gb: number) => call<unknown>("PUT", `/api/servers/${encodeURIComponent(id)}/disk`, { gb }),
   changePassword: (current: string, next: string) => call<{ ok: true }>("POST", "/api/auth/password", { current, next }),
   logout: () => call<{ ok: true }>("POST", "/api/auth/logout", {}),
   dashboard: () => call<Dashboard>("GET", "/api/dashboard"),

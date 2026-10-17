@@ -87,6 +87,8 @@ export interface BackupDeps {
   // Console commands over RCON; only called while the server runs.
   rcon: (id: string, commands: string[]) => Promise<string[]>;
   uid: number;
+  // Called after a restore swapped the folder (e.g. to put the disk cap back).
+  afterRestore?: (id: string) => Promise<void>;
 }
 
 export class Backups {
@@ -199,6 +201,7 @@ export class Backups {
       await rename(layout.root, target);
       await fixServerPropertiesFile(target);
       await chownTree(target, this.deps.uid, this.deps.uid);
+      await this.deps.afterRestore?.(job.serverId);
       job.state = "done";
     } catch (err) {
       job.state = "failed";

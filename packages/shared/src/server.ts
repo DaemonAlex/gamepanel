@@ -20,6 +20,8 @@ export const serverSpecSchema = z.object({
   // Java heap in MiB. The container gets more than this; see the agent's limits.
   memoryMb: z.number().int().min(512).max(32768),
   cpus: z.number().min(0.5).max(16),
+  // Disk cap for the server folder in GB (XFS quota on the node). Optional for older callers.
+  diskGb: z.number().int().min(1).max(10000).optional(),
   // Public port players reach. Inside the container the server always uses 25565.
   port: z.number().int().min(1024).max(65535),
   // The create flow must show the Minecraft EULA and the owner must accept it.

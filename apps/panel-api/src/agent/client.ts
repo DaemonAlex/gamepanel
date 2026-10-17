@@ -58,6 +58,7 @@ export class AgentClient {
   node = () => this.call<NodeInfo>("GET", "/v1/node");
   list = () => this.call<ServerStatus[]>("GET", "/v1/servers");
   status = (id: string) => this.call<ServerStatus>("GET", `/v1/servers/${id}`);
+  setDisk = (id: string, gb: number) => this.call<{ usedBytes: number; limitBytes: number } | null>("PUT", `/v1/servers/${id}/disk`, { gb });
   plugins = (id: string, folder: string) => this.call<PluginItem[]>("GET", `/v1/servers/${id}/plugins?folder=${folder}`);
   setPluginEnabled = (id: string, folder: string, file: string, on: boolean) => this.call<{ file: string }>("POST", `/v1/servers/${id}/plugins/enabled?folder=${folder}`, { file, on });
   installPlugin = (id: string, folder: string, u: PluginUpdate) => this.call<{ file: string; bytes: number }>("POST", `/v1/servers/${id}/plugins/install?folder=${folder}`, u);

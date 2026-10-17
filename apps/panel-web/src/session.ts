@@ -16,8 +16,8 @@ const ready = api
 export const session = {
   me,
   ready,
-  async login(email: string, password: string) {
-    me.value = await api.login(email, password);
+  async login(email: string, password: string, code?: string) {
+    me.value = await api.login(email, password, code);
   },
   async logout() {
     await api.logout().catch(() => {});

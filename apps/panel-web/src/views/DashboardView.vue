@@ -79,7 +79,7 @@ async function broadcast() {
         <h1>Servers</h1>
         <p v-if="data" class="muted">{{ data.servers.length }} server{{ data.servers.length === 1 ? "" : "s" }} &middot; {{ running }} running &middot; {{ players }} players online</p>
       </div>
-      <RouterLink v-if="session.me.value?.role === 'admin'" to="/new" class="btn gold"><Plus /> New server</RouterLink>
+      <RouterLink v-if="session.me.value?.role !== 'subuser'" to="/new" class="btn gold"><Plus /> New server</RouterLink>
     </section>
 
     <section v-if="data?.warnings.length" class="warnings" role="status" aria-live="polite">

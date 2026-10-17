@@ -19,6 +19,7 @@ const type = ref<ServerType>("PAPER");
 const version = ref("LATEST");
 const memoryGb = ref(4);
 const cpus = ref(2);
+const diskGb = ref(20);
 const eula = ref(false);
 const error = ref("");
 const busy = ref(false);
@@ -43,6 +44,7 @@ async function create() {
       version: version.value.trim().toUpperCase() === "LATEST" ? "LATEST" : version.value.trim(),
       memoryMb: Math.round(memoryGb.value * 1024),
       cpus: cpus.value,
+      diskGb: diskGb.value,
       eulaAccepted: true,
     });
     await router.push(`/servers/${s.id}`);
@@ -101,6 +103,9 @@ async function create() {
         <option :value="3">3</option>
         <option :value="4">4</option>
       </select>
+
+      <label for="disk" class="label">Disk: {{ diskGb }} GB</label>
+      <input id="disk" v-model.number="diskGb" type="range" min="5" max="200" step="5" />
 
       <label class="eula">
         <input v-model="eula" type="checkbox" />

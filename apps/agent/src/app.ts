@@ -142,6 +142,16 @@ export async function buildApp(token: string, servers: Servers, opts: FastifySer
     return reply.code(204).send();
   });
 
+  // Disk cap for a server folder (XFS project quota), and current use against it.
+  app.put("/v1/servers/:id/disk", async (req) => {
+    const id = parseId(req.params);
+    const gb = Number((req.body as { gb?: unknown } | undefined)?.gb);
+    if (!Number.isInteger(gb) || gb < 1 || gb > 10000) throw new FileError("gb must be 1 to 10000");
+    return servers.setDisk(id, gb);
+  });
+
+  app.get("/v1/servers/:id/disk", async (req) => servers.quotas.usage(parseId(req.params)));
+
   app.get("/v1/servers/:id/info", async (req) => servers.info(parseId(req.params)));
 
   app.get("/v1/servers/:id/stats", async (req, reply) => {
