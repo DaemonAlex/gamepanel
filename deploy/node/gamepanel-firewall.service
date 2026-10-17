@@ -1,0 +1,12 @@
+[Unit]
+Description=Game panel firewall for game containers
+After=docker.service
+PartOf=docker.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/local/sbin/gamepanel-firewall
+
+[Install]
+WantedBy=docker.service

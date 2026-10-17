@@ -1,0 +1,12 @@
+packages:
+  - "packages/*"
+  - "apps/*"
+
+# Install scripts of dependencies do not run. None of these are needed:
+# ssh2, cpu-features and protobufjs come with dockerode's SSH support (we use
+# the local socket); esbuild ships its binary as a separate package.
+allowBuilds:
+  cpu-features: false
+  esbuild: false
+  protobufjs: false
+  ssh2: false
