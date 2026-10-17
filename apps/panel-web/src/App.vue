@@ -13,7 +13,7 @@ async function logout() {
   <header v-if="session.me.value" class="top">
     <RouterLink to="/" class="brand">
       <span class="pin running" aria-hidden="true"></span>
-      <span>Game Panel</span>
+      <span>Daemon&rsquo;s Game Panel</span>
     </RouterLink>
     <span class="label coords" aria-hidden="true">X 0 &middot; Z 0</span>
     <RouterLink to="/account" class="who muted">{{ session.me.value.email }} &middot; {{ session.me.value.role }}</RouterLink>

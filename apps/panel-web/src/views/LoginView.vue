@@ -28,7 +28,7 @@ async function submit() {
 <template>
   <main class="login">
     <form class="panel" @submit.prevent="submit">
-      <div class="row"><span class="pin running" aria-hidden="true"></span><h1>Game Panel</h1></div>
+      <div class="row"><span class="pin running" aria-hidden="true"></span><h1>Daemon&rsquo;s Game Panel</h1></div>
       <p class="label">Spawn point</p>
       <label for="email" class="label">Email</label>
       <input id="email" v-model="email" type="email" autocomplete="username" required />
