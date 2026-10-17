@@ -85,3 +85,15 @@ export interface ServerInfo {
     max: number;
   } | null;
 }
+
+// One 30-second sample of a running server, for graphs and warnings.
+export interface ServerSample {
+  cpuPercent: number;
+  memoryBytes: number;
+  memoryLimitBytes: number;
+  players: number | null;
+  tps: number | null;
+  msptAvg: number | null;
+  diskBytes: number;
+  restartCount: number;
+}

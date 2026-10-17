@@ -1,4 +1,4 @@
-import type { Dashboard, Me, NewServer, PowerAction, ServerInfo, ServerView } from "@gamepanel/shared";
+import type { Dashboard, Me, MetricPoint, MetricRange, NewServer, NodeMetricPoint, PowerAction, ServerInfo, ServerView } from "@gamepanel/shared";
 
 // Talking to the panel API. Every change carries the x-gamepanel header the API requires.
 
@@ -31,6 +31,8 @@ export const api = {
   logout: () => call<{ ok: true }>("POST", "/api/auth/logout", {}),
   dashboard: () => call<Dashboard>("GET", "/api/dashboard"),
   server: (id: string) => call<ServerView>("GET", `/api/servers/${encodeURIComponent(id)}`),
+  metrics: (id: string, range: MetricRange) => call<MetricPoint[]>("GET", `/api/servers/${encodeURIComponent(id)}/metrics?range=${range}`),
+  nodeMetrics: (id: string, range: MetricRange) => call<NodeMetricPoint[]>("GET", `/api/nodes/${encodeURIComponent(id)}/metrics?range=${range}`),
   info: (id: string) => call<ServerInfo>("GET", `/api/servers/${encodeURIComponent(id)}/info`),
   create: (body: NewServer) => call<ServerView>("POST", "/api/servers", body),
   power: (id: string, action: PowerAction) => call<unknown>("POST", `/api/servers/${encodeURIComponent(id)}/power`, { action }),

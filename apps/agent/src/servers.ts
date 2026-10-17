@@ -4,7 +4,7 @@ import { cpus, totalmem } from "node:os";
 import { dirname } from "node:path";
 import { PassThrough, type Readable } from "node:stream";
 import Docker from "dockerode";
-import type { NodeInfo, PowerAction, ServerId, ServerInfo, ServerSpec, ServerState, ServerStats, ServerStatus } from "@gamepanel/shared";
+import type { NodeInfo, PowerAction, ServerId, ServerInfo, ServerSample, ServerSpec, ServerState, ServerStats, ServerStatus } from "@gamepanel/shared";
 import { readFile } from "node:fs/promises";
 import { ServerFiles } from "./files.js";
 import { folderBytes, listJars, parseProperties } from "./info.js";
@@ -252,6 +252,25 @@ export class Servers {
       plugins: await listJars(files, "plugins"),
       mods: await listJars(files, "mods"),
       live: running && ip ? await this.live(id, ip) : null,
+    };
+  }
+
+  // A cheap sample for the panel's 30-second poll: Docker numbers, one RCON
+  // round trip, and the cached folder size.
+  async sample(id: ServerId): Promise<ServerSample> {
+    const c = await this.docker.getContainer(containerName(id)).inspect();
+    const stats = await this.stats(id);
+    const ip = c.NetworkSettings.Networks[this.cfg.network]?.IPAddress || null;
+    const live = c.State.Running && ip ? await this.live(id, ip) : null;
+    return {
+      cpuPercent: stats.cpuPercent,
+      memoryBytes: stats.memoryBytes,
+      memoryLimitBytes: stats.memoryLimitBytes,
+      players: live?.online ?? stats.players?.online ?? null,
+      tps: live?.tps?.[0] ?? null,
+      msptAvg: live?.msptAvg ?? null,
+      diskBytes: await folderBytes(serverDir(this.cfg, id)),
+      restartCount: c.RestartCount ?? 0,
     };
   }
 

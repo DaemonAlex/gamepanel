@@ -3,6 +3,7 @@ import { computed, onMounted, onUnmounted, ref } from "vue";
 import type { ServerInfo, ServerView } from "@gamepanel/shared";
 import { api } from "../api.js";
 import { copy, gib, uptime } from "../format.js";
+import GraphsPanel from "./GraphsPanel.vue";
 
 const props = defineProps<{ server: ServerView }>();
 const info = ref<ServerInfo | null>(null);
@@ -115,6 +116,8 @@ const yesNo = (v: string | undefined) => (v === "true" ? "on" : v === "false" ? 
         <p class="muted small">of {{ server.stats ? gib(server.stats.memoryLimitBytes) : `${server.memoryMb} MB heap` }}</p>
       </div>
     </div>
+
+    <GraphsPanel :id="server.id" />
 
     <p v-if="crashed" class="panel bad-box">
       Last stop was not clean ({{ crashed.oomKilled ? "ran out of memory" : `exit code ${crashed.code}` }}) on {{ when(crashed.at) }}.

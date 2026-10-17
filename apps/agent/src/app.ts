@@ -39,6 +39,13 @@ export async function buildApp(token: string, servers: Servers, opts: FastifySer
 
   app.get("/v1/servers", async () => servers.list());
 
+  app.get("/v1/servers/:id/sample", async (req, reply) => {
+    const id = parseId(req.params);
+    const status = await servers.status(id);
+    if (status.state !== "running" && status.state !== "starting") return reply.code(409).send({ error: "server is not running" });
+    return servers.sample(id);
+  });
+
   app.get("/v1/servers/:id/info", async (req) => servers.info(parseId(req.params)));
 
   app.get("/v1/servers/:id/stats", async (req, reply) => {

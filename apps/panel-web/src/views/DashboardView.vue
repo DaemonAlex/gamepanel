@@ -2,7 +2,9 @@
 import { computed, onMounted, onUnmounted, ref } from "vue";
 import type { Dashboard, PowerAction } from "@gamepanel/shared";
 import { api } from "../api.js";
+import LineChart from "../components/LineChart.vue";
 import ServerCard from "../components/ServerCard.vue";
+import type { NodeMetricPoint } from "@gamepanel/shared";
 import { barClass, gib, pct } from "../format.js";
 import { session } from "../session.js";
 
@@ -14,10 +16,15 @@ const notice = ref("");
 const confirmAll = ref<PowerAction | null>(null);
 let timer: ReturnType<typeof setInterval> | undefined;
 
+const nodeHistory = ref<Record<string, NodeMetricPoint[]>>({});
+
 async function load() {
   try {
     data.value = await api.dashboard();
     error.value = "";
+    for (const n of data.value.nodes ?? []) {
+      api.nodeMetrics(n.id, "24h").then((h) => (nodeHistory.value = { ...nodeHistory.value, [n.id]: h })).catch(() => {});
+    }
   } catch (e) {
     error.value = (e as Error).message;
   }
@@ -74,6 +81,14 @@ async function broadcast() {
       <RouterLink v-if="session.me.value?.role === 'admin'" to="/new" class="btn gold">New server</RouterLink>
     </section>
 
+    <section v-if="data?.warnings.length" class="warnings" role="status" aria-live="polite">
+      <component :is="w.serverId ? 'RouterLink' : 'div'" v-for="(w, i) in data.warnings" :key="i" :to="w.serverId ? `/servers/${w.serverId}` : undefined" class="warning" :class="w.level">
+        <span class="pin" :class="w.level === 'bad' ? 'unreachable' : 'running'" aria-hidden="true"></span>
+        <span>{{ w.text }}</span>
+      </component>
+    </section>
+    <p v-else-if="data" class="label allclear">All clear: no warnings</p>
+
     <section v-if="data?.nodes" class="nodes">
       <article v-for="n in data.nodes" :key="n.id" class="panel node">
         <div class="row between">
@@ -97,6 +112,10 @@ async function broadcast() {
             </div>
           </div>
           <p class="muted small">{{ n.info.servers.running }} of {{ n.info.servers.total }} running &middot; {{ n.info.cpus }} CPUs</p>
+          <div v-if="nodeHistory[n.id]?.length" class="node-graphs">
+            <LineChart title="RAM promised, 24 h" :points="nodeHistory[n.id]!.map((p) => ({ t: p.t, v: p.memAllocatedBytes }))" :limit="n.info.memoryBytes" color="var(--gold)" :format="gib" />
+            <LineChart title="Disk used, 24 h" :points="nodeHistory[n.id]!.map((p) => ({ t: p.t, v: p.diskUsedBytes }))" :limit="n.info.disk.totalBytes" color="var(--ink2)" :format="gib" />
+          </div>
         </template>
       </article>
     </section>
@@ -130,13 +149,18 @@ async function broadcast() {
     <p v-if="data && !data.servers.length" class="panel muted">No servers yet. Use New server to place the first waypoint.</p>
 
     <section class="grid">
-      <ServerCard v-for="s in shown" :key="s.id" :server="s" />
+      <ServerCard v-for="s in shown" :key="s.id" :server="s" :spark="data?.sparks[s.id]" />
     </section>
   </main>
 </template>
 
 <style scoped>
 .title { align-items: flex-end; }
+.warnings { display: flex; flex-direction: column; gap: 6px; }
+.warning { display: flex; align-items: center; gap: 12px; padding: 10px 14px; background: var(--deep); border: 1px solid var(--line); border-left: 4px solid var(--warn); color: var(--ink); text-decoration: none; }
+.warning.bad { border-left-color: var(--bad); }
+.allclear { margin: 0; color: var(--ok); }
+.node-graphs { display: grid; grid-template-columns: 1fr; gap: 8px; }
 .grow { flex: 1; min-width: 0; }
 .nodes { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 14px; }
 .node { display: flex; flex-direction: column; gap: 10px; }

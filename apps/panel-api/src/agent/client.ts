@@ -1,7 +1,7 @@
 import type { Readable } from "node:stream";
 import { Agent, request } from "undici";
 import WebSocket from "ws";
-import type { NodeInfo, PowerAction, ServerInfo, ServerSpec, ServerStats, ServerStatus } from "@gamepanel/shared";
+import type { NodeInfo, PowerAction, ServerInfo, ServerSample, ServerSpec, ServerStats, ServerStatus } from "@gamepanel/shared";
 
 // Talking to one node's agent. TLS trusts only that node's own certificate,
 // and every call carries the node's token.
@@ -58,6 +58,7 @@ export class AgentClient {
   node = () => this.call<NodeInfo>("GET", "/v1/node");
   list = () => this.call<ServerStatus[]>("GET", "/v1/servers");
   status = (id: string) => this.call<ServerStatus>("GET", `/v1/servers/${id}`);
+  sample = (id: string) => this.call<ServerSample>("GET", `/v1/servers/${id}/sample`);
   info = (id: string) => this.call<ServerInfo>("GET", `/v1/servers/${id}/info`);
   stats = (id: string) => this.call<ServerStats>("GET", `/v1/servers/${id}/stats`);
   apply = (spec: ServerSpec) => this.call<ServerStatus>("PUT", `/v1/servers/${spec.id}`, spec);

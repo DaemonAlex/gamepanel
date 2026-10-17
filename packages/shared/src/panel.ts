@@ -73,4 +73,38 @@ export interface Dashboard {
   servers: ServerView[];
   // Only for admins.
   nodes: NodeView[] | null;
+  warnings: Warning[];
+  // Last hour per server, one point a minute, for the small trend lines.
+  sparks: Record<string, { cpu: number[]; players: number[] }>;
+}
+
+export const metricRanges = ["1h", "24h", "7d"] as const;
+export type MetricRange = (typeof metricRanges)[number];
+
+// One averaged point of a server's history.
+export interface MetricPoint {
+  t: string;
+  cpu: number;
+  memBytes: number;
+  memLimitBytes: number;
+  players: number | null;
+  tps: number | null;
+  mspt: number | null;
+  diskBytes: number;
+}
+
+export interface NodeMetricPoint {
+  t: string;
+  memAllocatedBytes: number;
+  memTotalBytes: number;
+  diskUsedBytes: number;
+  diskTotalBytes: number;
+  running: number;
+}
+
+export interface Warning {
+  level: "warn" | "bad";
+  serverId?: string;
+  nodeId?: string;
+  text: string;
 }

@@ -12,7 +12,9 @@ import {
   loginSchema,
   newServerSchema,
   powerBodySchema,
+  metricRanges,
   type Dashboard,
+  type MetricRange,
   type Me,
   type NodeView,
   type ServerView,
@@ -24,6 +26,7 @@ import type { PanelConfig } from "./config.js";
 import { schema, type Db } from "./db/index.js";
 import { containerBytesFor, memoryFits, nextFreePort } from "./services/allocation.js";
 import { audit } from "./services/audit.js";
+import { computeWarnings, nodeSeries, serverSeries, sparks, warningInput } from "./services/metrics.js";
 import type { NodeRow, Nodes } from "./services/nodes.js";
 
 const COOKIE = "gp_session";
@@ -244,7 +247,30 @@ export async function buildApp({ cfg, db, nodes }: AppDeps, opts: { logger?: boo
   app.get("/api/dashboard", async (req): Promise<Dashboard> => {
     const me = requireMe(req);
     const [servers, nodeList] = await Promise.all([viewsFor(await visibleServers(me)), me.role === "admin" ? nodeViews() : null]);
-    return { servers: servers.sort((a, b) => a.name.localeCompare(b.name)), nodes: nodeList };
+    const ids = servers.map((s) => s.id);
+    const input = await warningInput(db, servers);
+    // Owners see warnings about their own servers; node warnings are for admins.
+    const warnings = computeWarnings({ servers, ...input, nodes: me.role === "admin" ? input.nodes : [] });
+    return { servers: servers.sort((a, b) => a.name.localeCompare(b.name)), nodes: nodeList, warnings, sparks: await sparks(db, ids) };
+  });
+
+  function rangeOf(req: FastifyRequest): MetricRange {
+    const r = (req.query as { range?: string }).range ?? "1h";
+    if (!(metricRanges as readonly string[]).includes(r)) throw new HttpError(400, "range must be 1h, 24h or 7d");
+    return r as MetricRange;
+  }
+
+  app.get("/api/servers/:id/metrics", async (req) => {
+    const me = requireMe(req);
+    const { row } = await serverFor(me, (req.params as { id: string }).id);
+    return serverSeries(db, row.id, rangeOf(req));
+  });
+
+  app.get("/api/nodes/:id/metrics", async (req) => {
+    requireAdmin(req);
+    const node = await nodes.get((req.params as { id: string }).id);
+    if (!node) throw new HttpError(404, "node not found");
+    return nodeSeries(db, node.id, rangeOf(req));
   });
 
   app.get("/api/servers/:id", async (req) => {

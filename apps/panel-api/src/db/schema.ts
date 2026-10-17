@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { bigserial, boolean, index, integer, jsonb, pgEnum, pgTable, real, text, timestamp, uniqueIndex } from "drizzle-orm/pg-core";
+import { bigint, bigserial, boolean, index, integer, jsonb, pgEnum, pgTable, real, text, timestamp, uniqueIndex } from "drizzle-orm/pg-core";
 
 export const roleEnum = pgEnum("role", ["admin", "owner", "subuser"]);
 
@@ -63,3 +63,28 @@ export const auditLog = pgTable("audit_log", {
   ip: text("ip"),
   detail: jsonb("detail"),
 }, (t) => [index("audit_at").on(t.at), index("audit_server").on(t.serverId)]);
+
+// One row every 30 seconds per running server. Kept for 8 days.
+export const serverSamples = pgTable("server_samples", {
+  serverId: text("server_id").notNull(),
+  at: timestamp("at", { withTimezone: true }).notNull().defaultNow(),
+  cpu: real("cpu").notNull(),
+  memBytes: bigint("mem_bytes", { mode: "number" }).notNull(),
+  memLimitBytes: bigint("mem_limit_bytes", { mode: "number" }).notNull(),
+  players: integer("players"),
+  tps: real("tps"),
+  mspt: real("mspt"),
+  diskBytes: bigint("disk_bytes", { mode: "number" }).notNull(),
+  restarts: integer("restarts").notNull(),
+}, (t) => [index("server_samples_server_at").on(t.serverId, t.at)]);
+
+// One row every 30 seconds per node.
+export const nodeSamples = pgTable("node_samples", {
+  nodeId: text("node_id").notNull(),
+  at: timestamp("at", { withTimezone: true }).notNull().defaultNow(),
+  memTotalBytes: bigint("mem_total_bytes", { mode: "number" }).notNull(),
+  memAllocatedBytes: bigint("mem_allocated_bytes", { mode: "number" }).notNull(),
+  diskTotalBytes: bigint("disk_total_bytes", { mode: "number" }).notNull(),
+  diskFreeBytes: bigint("disk_free_bytes", { mode: "number" }).notNull(),
+  running: integer("running").notNull(),
+}, (t) => [index("node_samples_node_at").on(t.nodeId, t.at)]);

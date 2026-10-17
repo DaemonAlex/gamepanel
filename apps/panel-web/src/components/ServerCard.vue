@@ -3,7 +3,16 @@ import { computed, ref } from "vue";
 import type { ServerView } from "@gamepanel/shared";
 import { barClass, copy, gib, pct, stateOf } from "../format.js";
 
-const props = defineProps<{ server: ServerView }>();
+const props = defineProps<{ server: ServerView; spark?: { cpu: number[]; players: number[] } | undefined }>();
+
+// Last hour of CPU as a tiny line (one point a minute).
+const sparkLine = computed(() => {
+  const v = props.spark?.cpu ?? [];
+  if (v.length < 2) return "";
+  const top = Math.max(...v, 1);
+  return v.map((n, i) => `${((i / (v.length - 1)) * 100).toFixed(1)},${(28 - (n / top) * 26).toFixed(1)}`).join(" ");
+});
+const peakPlayers = computed(() => Math.max(0, ...(props.spark?.players ?? [])));
 const state = computed(() => stateOf(props.server));
 const mem = computed(() => (props.server.stats ? pct(props.server.stats.memoryBytes, props.server.stats.memoryLimitBytes) : 0));
 const copied = ref(false);
@@ -43,6 +52,11 @@ async function copyAddress() {
       </div>
       <div :class="barClass(mem)"><span :style="{ width: `${mem}%` }"></span></div>
     </div>
+    <div v-if="sparkLine" class="spark">
+      <span class="label">CPU, last hour</span>
+      <span class="label">peak {{ peakPlayers }} players</span>
+      <svg viewBox="0 0 100 30" preserveAspectRatio="none" aria-hidden="true"><polyline :points="sparkLine" fill="none" stroke="var(--gold)" stroke-width="1.5" vector-effect="non-scaling-stroke" /></svg>
+    </div>
     <p v-if="server.error" class="error">{{ server.error }}</p>
   </article>
 </template>
@@ -59,5 +73,7 @@ dl { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; 
 dd { margin: 2px 0 0; font-size: 15px; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
 .between { justify-content: space-between; margin-bottom: 4px; }
 .small-text { font-size: 13px; color: var(--ink2); }
+.spark { display: grid; grid-template-columns: 1fr auto; gap: 2px 8px; }
+.spark svg { grid-column: 1 / -1; width: 100%; height: 30px; display: block; }
 @media (max-width: 420px) { dl { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 </style>
