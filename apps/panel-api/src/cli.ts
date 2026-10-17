@@ -14,7 +14,8 @@ import { schema } from "./db/index.js";
 //   add-node --id node1 --name "Node 1" --url https://10.20.20.10:8443 --token-file F --ca-file F --public-ip 1.2.3.4 --ports 25566-25600
 //   register-server --id pw --name "Perpetual Wonders" --node node1 --owner you@example.com --type PAPER --version 1.21.4 --memory 6144 --cpus 4 --port 25565 [--hostname pw.mc.example.com]
 //     (for a server that already runs on a node; EULA is recorded as accepted by the owner now)
-//   invite --email friend@example.com --role subuser|owner|admin   prints a one-time join link path (7 days)
+//   invite --email friend@example.com --role subuser|owner|admin [--give-server pw]
+//     prints a one-time join link path (7 days); --give-server makes them that server's owner when they join
 
 const cfg = loadConfig();
 const sql = postgres(cfg.databaseUrl, { max: 1 });
@@ -93,14 +94,15 @@ try {
     });
     console.log(`server ${v.id} registered`);
   } else if (command === "invite") {
-    const { values } = parseArgs({ args: rest, options: { email: { type: "string" }, role: { type: "string" } } });
+    const { values } = parseArgs({ args: rest, options: { email: { type: "string" }, role: { type: "string" }, "give-server": { type: "string" } } });
     const email = need(values.email, "email").toLowerCase();
     const role = (values.role ?? "owner") as "admin" | "owner" | "subuser";
     if (!["admin", "owner", "subuser"].includes(role)) throw new Error("--role must be admin, owner or subuser");
     const [exists] = await db.select({ id: schema.users.id }).from(schema.users).where(eq(schema.users.email, email));
     if (exists) throw new Error("that email already has an account");
     const token = newSessionId();
-    await db.insert(schema.invites).values({ tokenHash: sessionHash(token), kind: "invite", email, role, userId: null, createdBy: "cli", expiresAt: new Date(Date.now() + 7 * 86_400_000) });
+    const give = values["give-server"] ? serverIdSchema.parse(values["give-server"]) : null;
+    await db.insert(schema.invites).values({ tokenHash: sessionHash(token), kind: "invite", email, role, userId: null, giveServerId: give, createdBy: "cli", expiresAt: new Date(Date.now() + 7 * 86_400_000) });
     console.log(`invite for ${email} (${role}): /invite/${token}`);
   } else {
     console.log("commands: create-admin, add-node, register-server, invite");

@@ -306,6 +306,19 @@ describe("people and permissions", () => {
     await login("friend@example.com", "a-good-long-password");
   });
 
+  it("hands a server to the person when they join, if the invite says so", async () => {
+    const admin = await login("admin@example.com", "admin-pass");
+    const token = await invite(admin, "eric@example.com", "subuser");
+    await db.update(schema.invites).set({ giveServerId: "pw" }).where(eq(schema.invites.email, "eric@example.com"));
+    const ok = await app.inject({ method: "POST", url: "/api/invite/accept", headers: H, payload: { token, password: "eric-long-password-1" } });
+    const eric = ok.json() as { id: string };
+    const [pw] = await db.select().from(schema.servers).where(eq(schema.servers.id, "pw"));
+    expect(pw!.ownerId).toBe(eric.id);
+    const cookie = await login("eric@example.com", "eric-long-password-1");
+    const dash = (await app.inject({ url: "/api/dashboard", headers: { cookie } })).json();
+    expect(dash.servers.map((x: { id: string; perms: string[] }) => [x.id, x.perms])).toEqual([["pw", ["all"]]]);
+  });
+
   it("only admins see users and send invites", async () => {
     const bob = await login("bob@example.com", "bob-pass");
     expect((await app.inject({ url: "/api/users", headers: { cookie: bob } })).statusCode).toBe(403);

@@ -352,6 +352,10 @@ export async function buildApp({ cfg, db, nodes }: AppDeps, opts: { logger?: boo
     } else {
       userId = randomUUID();
       await db.insert(schema.users).values({ id: userId, email: inv.email, passwordHash: await hashPassword(password), role: inv.role });
+      if (inv.giveServerId) {
+        await db.update(schema.servers).set({ ownerId: userId }).where(eq(schema.servers.id, inv.giveServerId));
+        await audit(db, { userId, action: "server.owner", serverId: inv.giveServerId, ip: req.ip, detail: { to: inv.email, via: "invite" } });
+      }
     }
     await db.update(schema.invites).set({ usedAt: new Date() }).where(eq(schema.invites.tokenHash, inv.tokenHash));
     const sid = newSessionId();

@@ -26,6 +26,8 @@ export const invites = pgTable("invites", {
   email: text("email").notNull(),
   role: roleEnum("role").notNull().default("owner"),
   userId: text("user_id"),
+  // A server handed to this person when they join (ownership moves to them).
+  giveServerId: text("give_server_id"),
   createdBy: text("created_by").notNull(),
   expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
   usedAt: timestamp("used_at", { withTimezone: true }),
