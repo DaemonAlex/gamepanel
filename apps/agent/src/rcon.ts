@@ -2,6 +2,10 @@ import { connect, type Socket } from "node:net";
 
 // A small RCON client (Source RCON protocol, which Minecraft uses).
 // RCON is only reached on the game network from the node; it is never published.
+//
+// Minecraft logs every new RCON connection ("Thread RCON Client ... started /
+// shutting down"), so the pool below keeps one connection per server open and
+// reuses it, instead of connecting for every poll.
 
 const AUTH = 3;
 const COMMAND = 2;
@@ -16,60 +20,145 @@ function packet(id: number, type: number, body: string): Buffer {
   return buf; // last two bytes stay 0: body terminator and empty string
 }
 
-// Run commands on one connection and return each answer as text.
-export async function rcon(host: string, port: number, password: string, commands: string[], timeoutMs = 4000): Promise<string[]> {
-  const socket: Socket = connect({ host, port });
-  socket.setTimeout(timeoutMs);
-  let buffer = Buffer.alloc(0);
-  const waiting = new Map<number, (body: string) => void>();
-  let failed: Error | null = null;
+export class RconConnection {
+  private socket: Socket | null = null;
+  private buffer = Buffer.alloc(0);
+  private waiting = new Map<number, { resolve: (body: string) => void; reject: (err: Error) => void }>();
+  private nextId = 10;
+  closed = false;
 
-  const fail = (err: Error) => {
-    failed = err;
-    for (const resolve of waiting.values()) resolve("");
-    socket.destroy();
-  };
-  socket.on("timeout", () => fail(new Error("rcon timed out")));
-  socket.on("error", fail);
-  socket.on("data", (chunk: Buffer) => {
-    buffer = Buffer.concat([buffer, chunk]);
-    while (buffer.length >= 4) {
-      const len = buffer.readInt32LE(0);
-      if (len < 10 || len > 1 << 20) return fail(new Error("bad rcon packet"));
-      if (buffer.length < 4 + len) break;
-      const id = buffer.readInt32LE(4);
-      const body = buffer.toString("utf8", 12, 4 + len - 2);
-      buffer = buffer.subarray(4 + len);
-      waiting.get(id)?.(body);
-      waiting.delete(id);
-    }
-  });
+  constructor(
+    readonly host: string,
+    readonly port: number,
+    private readonly password: string,
+    private readonly timeoutMs = 4000,
+  ) {}
 
-  await new Promise<void>((resolve, reject) => {
-    socket.once("connect", resolve);
-    socket.once("error", reject);
-  });
+  private failAll(err: Error) {
+    this.closed = true;
+    for (const w of this.waiting.values()) w.reject(err);
+    this.waiting.clear();
+    this.socket?.destroy();
+  }
 
-  const send = (id: number, type: number, body: string) =>
-    new Promise<string>((resolve) => {
-      waiting.set(id, resolve);
-      socket.write(packet(id, type, body));
+  async open(): Promise<void> {
+    const socket = connect({ host: this.host, port: this.port });
+    this.socket = socket;
+    socket.setKeepAlive(true, 30_000);
+    socket.on("error", (err) => this.failAll(err));
+    socket.on("close", () => this.failAll(new Error("rcon connection closed")));
+    socket.on("data", (chunk: Buffer) => {
+      this.buffer = Buffer.concat([this.buffer, chunk]);
+      while (this.buffer.length >= 4) {
+        const len = this.buffer.readInt32LE(0);
+        if (len < 10 || len > 1 << 20) return this.failAll(new Error("bad rcon packet"));
+        if (this.buffer.length < 4 + len) break;
+        const id = this.buffer.readInt32LE(4);
+        const body = this.buffer.toString("utf8", 12, 4 + len - 2);
+        this.buffer = this.buffer.subarray(4 + len);
+        // A failed login answers with id -1.
+        if (id === -1) return this.failAll(new Error("rcon login failed"));
+        this.waiting.get(id)?.resolve(body);
+        this.waiting.delete(id);
+      }
     });
+    await new Promise<void>((resolve, reject) => {
+      socket.once("connect", resolve);
+      socket.once("error", reject);
+    });
+    await this.send(AUTH, this.password);
+  }
 
-  try {
-    // A failed login answers with id -1, so our id never comes back: treat silence as failure.
-    const authId = 1;
-    const authed = await Promise.race([send(authId, AUTH, password).then(() => true), new Promise<boolean>((r) => setTimeout(() => r(false), timeoutMs))]);
-    if (!authed || failed) throw failed ?? new Error("rcon login failed");
-    const out: string[] = [];
-    let id = 10;
-    for (const cmd of commands) {
-      out.push(await send(id++, COMMAND, cmd));
-      if (failed) throw failed;
+  private send(type: number, body: string): Promise<string> {
+    if (this.closed || !this.socket) return Promise.reject(new Error("rcon connection closed"));
+    const id = this.nextId++;
+    return new Promise<string>((resolve, reject) => {
+      const timer = setTimeout(() => {
+        this.waiting.delete(id);
+        this.failAll(new Error("rcon timed out"));
+        reject(new Error("rcon timed out"));
+      }, this.timeoutMs);
+      this.waiting.set(id, {
+        resolve: (b) => (clearTimeout(timer), resolve(b)),
+        reject: (e) => (clearTimeout(timer), reject(e)),
+      });
+      this.socket!.write(packet(id, type, body));
+    });
+  }
+
+  command(cmd: string): Promise<string> {
+    return this.send(COMMAND, cmd);
+  }
+
+  close() {
+    this.closed = true;
+    this.socket?.destroy();
+  }
+}
+
+// One open connection per server. Commands for a server run one after another.
+// A dropped connection (server restarted, new address) is replaced once.
+export class RconPool {
+  private conns = new Map<string, RconConnection>();
+  private queues = new Map<string, Promise<unknown>>();
+
+  constructor(private readonly timeoutMs = 4000) {}
+
+  run(key: string, host: string, port: number, password: string, commands: string[]): Promise<string[]> {
+    const prev = this.queues.get(key) ?? Promise.resolve();
+    const next = prev.catch(() => {}).then(() => this.runNow(key, host, port, password, commands));
+    this.queues.set(key, next);
+    return next;
+  }
+
+  private async conn(key: string, host: string, port: number, password: string): Promise<RconConnection> {
+    const have = this.conns.get(key);
+    if (have && !have.closed && have.host === host && have.port === port) return have;
+    have?.close();
+    const c = new RconConnection(host, port, password, this.timeoutMs);
+    this.conns.set(key, c);
+    try {
+      await c.open();
+    } catch (err) {
+      c.close();
+      this.conns.delete(key);
+      throw err;
     }
+    return c;
+  }
+
+  private async runNow(key: string, host: string, port: number, password: string, commands: string[]): Promise<string[]> {
+    for (let attempt = 0; ; attempt++) {
+      try {
+        const c = await this.conn(key, host, port, password);
+        const out: string[] = [];
+        for (const cmd of commands) out.push(await c.command(cmd));
+        return out;
+      } catch (err) {
+        this.conns.get(key)?.close();
+        this.conns.delete(key);
+        if (attempt >= 1) throw err;
+      }
+    }
+  }
+
+  // Forget a server's connection (e.g. it was stopped or removed).
+  drop(key: string) {
+    this.conns.get(key)?.close();
+    this.conns.delete(key);
+  }
+}
+
+// One-off helper kept for callers that do not need a pooled connection.
+export async function rcon(host: string, port: number, password: string, commands: string[], timeoutMs = 4000): Promise<string[]> {
+  const c = new RconConnection(host, port, password, timeoutMs);
+  try {
+    await c.open();
+    const out: string[] = [];
+    for (const cmd of commands) out.push(await c.command(cmd));
     return out;
   } finally {
-    socket.destroy();
+    c.close();
   }
 }
 

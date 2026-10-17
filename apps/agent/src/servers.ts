@@ -13,7 +13,7 @@ import { folderBytes, listJars } from "./info.js";
 import { commandFor, readPlayerFiles } from "./players.js";
 import { readProperties, withoutSecrets, writeProperties } from "./properties-file.js";
 import { copyFile } from "node:fs/promises";
-import { parseList, parseMspt, parseTps, plain, rcon } from "./rcon.js";
+import { parseList, parseMspt, parseTps, plain, RconPool } from "./rcon.js";
 import { chownTree, detect, extractArchive, findLayout, fixServerPropertiesFile, type ArchiveFormat, type Detected } from "./import.js";
 import type { AgentConfig } from "./config.js";
 import { buildCreateOptions, containerName, imageFor, LABEL, MC_UID, rconPasswordFile, serverDir, STOP_TIMEOUT_S } from "./containers.js";
@@ -53,6 +53,8 @@ function stateFrom(info: Docker.ContainerInspectInfo): ServerState {
 
 export class Servers {
   readonly backups: Backups;
+  // One kept-open RCON connection per server (new connections spam the server log).
+  private readonly rconPool = new RconPool();
 
   constructor(
     private readonly cfg: AgentConfig,
@@ -325,7 +327,7 @@ export class Servers {
     const ip = c.NetworkSettings.Networks[this.cfg.network]?.IPAddress;
     if (!c.State.Running || !ip) throw new ConflictError("the server is not running");
     const password = (await readFile(rconPasswordFile(this.cfg, id), "utf8")).trim();
-    return (await rcon(ip, 25575, password, commands)).map(plain);
+    return (await this.rconPool.run(id, ip, 25575, password, commands)).map(plain);
   }
 
   async players(id: ServerId): Promise<PlayersView> {
@@ -363,7 +365,7 @@ export class Servers {
     try {
       const password = (await readFile(rconPasswordFile(this.cfg, id), "utf8")).trim();
       // minecraft:list skips plugins (like Essentials) that replace "list".
-      const [tps, mspt, list] = await rcon(ip, 25575, password, ["tps", "mspt", "minecraft:list uuids"]);
+      const [tps, mspt, list] = await this.rconPool.run(id, ip, 25575, password, ["tps", "mspt", "minecraft:list uuids"]);
       const players = parseList(list ?? "");
       return {
         tps: parseTps(tps ?? ""),
