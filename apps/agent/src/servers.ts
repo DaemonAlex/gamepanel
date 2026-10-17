@@ -4,11 +4,12 @@ import { cpus, totalmem } from "node:os";
 import { dirname } from "node:path";
 import { PassThrough, type Readable } from "node:stream";
 import Docker from "dockerode";
-import type { NodeInfo, PowerAction, ServerId, ServerInfo, ServerSample, ServerSpec, ServerState, ServerStats, ServerStatus } from "@gamepanel/shared";
+import type { NodeInfo, PlayerAction, PlayersView, PowerAction, ServerId, ServerInfo, ServerSample, ServerSpec, ServerState, ServerStats, ServerStatus } from "@gamepanel/shared";
 import { readFile } from "node:fs/promises";
 import { ServerFiles } from "./files.js";
 import { folderBytes, listJars, parseProperties } from "./info.js";
-import { parseList, parseMspt, parseTps, rcon } from "./rcon.js";
+import { commandFor, readPlayerFiles } from "./players.js";
+import { parseList, parseMspt, parseTps, plain, rcon } from "./rcon.js";
 import { chownTree, detect, extractArchive, findLayout, fixServerPropertiesFile, type ArchiveFormat, type Detected } from "./import.js";
 import type { AgentConfig } from "./config.js";
 import { buildCreateOptions, containerName, imageFor, LABEL, MC_UID, rconPasswordFile, serverDir, STOP_TIMEOUT_S } from "./containers.js";
@@ -272,6 +273,45 @@ export class Servers {
       diskBytes: await folderBytes(serverDir(this.cfg, id)),
       restartCount: c.RestartCount ?? 0,
     };
+  }
+
+  // Run commands over RCON on a running server and return the plain answers.
+  private async rconRun(id: ServerId, commands: string[]): Promise<string[]> {
+    const c = await this.docker.getContainer(containerName(id)).inspect();
+    const ip = c.NetworkSettings.Networks[this.cfg.network]?.IPAddress;
+    if (!c.State.Running || !ip) throw new ConflictError("the server is not running");
+    const password = (await readFile(rconPasswordFile(this.cfg, id), "utf8")).trim();
+    return (await rcon(ip, 25575, password, commands)).map(plain);
+  }
+
+  async players(id: ServerId): Promise<PlayersView> {
+    const files = this.files(id);
+    const fromFiles = await readPlayerFiles(files);
+    const whitelistOn = (await files.readText("server.properties").catch(() => "")).match(/^white-list\s*=\s*true/m) !== null;
+    let running = false;
+    let online: PlayersView["online"] = [];
+    let max = 0;
+    try {
+      const [list] = await this.rconRun(id, ["minecraft:list uuids"]);
+      const parsed = parseList(list ?? "");
+      running = true;
+      online = parsed?.players ?? [];
+      max = parsed?.max ?? 0;
+    } catch {
+      // Stopped, or not answering yet: the lists from files still show.
+    }
+    return { running, online, max, whitelistOn, ...fromFiles };
+  }
+
+  // One player action; returns what the server answered.
+  async playerAction(id: ServerId, action: PlayerAction): Promise<string> {
+    const [answer] = await this.rconRun(id, [commandFor(action)]);
+    return answer ?? "";
+  }
+
+  async setWhitelist(id: ServerId, on: boolean): Promise<string> {
+    const [answer] = await this.rconRun(id, [on ? "minecraft:whitelist on" : "minecraft:whitelist off"]);
+    return answer ?? "";
   }
 
   // TPS, tick time and the player list over RCON. Missing commands just come back null.

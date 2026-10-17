@@ -97,3 +97,37 @@ export interface ServerSample {
   diskBytes: number;
   restartCount: number;
 }
+
+// --- players ---
+
+// Java Edition names: 3 to 16 letters, digits or underscores. Older accounts can be shorter.
+export const playerNameSchema = z.string().regex(/^[A-Za-z0-9_]{1,16}$/, "not a Minecraft name");
+
+export const playerActions = ["kick", "ban", "pardon", "op", "deop", "whitelist-add", "whitelist-remove", "tell"] as const;
+export const playerActionSchema = z.object({
+  action: z.enum(playerActions),
+  name: playerNameSchema,
+  // Reason for kick/ban, or the message for tell. One line.
+  text: z.string().max(200).regex(/^[^\r\n]*$/).optional(),
+});
+export type PlayerAction = z.infer<typeof playerActionSchema>;
+
+export const whitelistToggleSchema = z.object({ on: z.boolean() });
+
+export interface PlayerRef {
+  name: string;
+  uuid: string | null;
+}
+
+export interface PlayersView {
+  running: boolean;
+  online: PlayerRef[];
+  max: number;
+  whitelistOn: boolean;
+  whitelist: PlayerRef[];
+  ops: (PlayerRef & { level: number })[];
+  banned: (PlayerRef & { reason: string; source: string })[];
+  bannedIps: { ip: string; reason: string }[];
+  // Everyone the server has seen (usercache.json), newest first.
+  known: (PlayerRef & { lastSeen: string | null })[];
+}

@@ -13,6 +13,8 @@ import {
   newServerSchema,
   powerBodySchema,
   metricRanges,
+  playerActionSchema,
+  whitelistToggleSchema,
   type Dashboard,
   type MetricRange,
   type Me,
@@ -426,6 +428,34 @@ export async function buildApp({ cfg, db, nodes }: AppDeps, opts: { logger?: boo
       void audit(db, { userId: me!.id, action: "console.command", serverId: target.row.id, ip: req.ip, detail: { cmd: parsed.data.cmd } });
     });
     socket.on("close", () => upstream.close());
+  });
+
+  // --- players -------------------------------------------------------------------
+
+  app.get("/api/servers/:id/players", async (req) => {
+    const me = requireMe(req);
+    const { row, node } = await serverFor(me, (req.params as { id: string }).id);
+    return nodes.client(node).players(row.id);
+  });
+
+  app.post("/api/servers/:id/players/action", async (req) => {
+    const me = requireMe(req);
+    const ip = req.ip;
+    const { row, node } = await serverFor(me, (req.params as { id: string }).id);
+    const action = playerActionSchema.parse(req.body);
+    const result = await nodes.client(node).playerAction(row.id, action);
+    await audit(db, { userId: me.id, action: `player.${action.action}`, serverId: row.id, ip, detail: { ...action, answer: result.answer } });
+    return result;
+  });
+
+  app.post("/api/servers/:id/players/whitelist", async (req) => {
+    const me = requireMe(req);
+    const ip = req.ip;
+    const { row, node } = await serverFor(me, (req.params as { id: string }).id);
+    const { on } = whitelistToggleSchema.parse(req.body);
+    const result = await nodes.client(node).setWhitelist(row.id, on);
+    await audit(db, { userId: me.id, action: on ? "whitelist.on" : "whitelist.off", serverId: row.id, ip, detail: result });
+    return result;
   });
 
   // --- files ---------------------------------------------------------------------

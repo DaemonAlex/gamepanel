@@ -33,6 +33,7 @@ function fakeAgent(memoryBytes = 16 * GiB) {
     remove: vi.fn(async () => {}),
     listFiles: vi.fn(async () => [{ name: "server.properties", type: "file", size: 9, modified: "2026-10-17T00:00:00Z" }]),
     writeFile: vi.fn(async () => {}),
+    playerAction: vi.fn(async () => ({ answer: "Made Alex a server operator" })),
     async uploadChunk(_id: string, _path: string, _offset: number, _done: boolean, body: NodeJS.ReadableStream) {
       let size = 0;
       for await (const c of body) size += (c as Buffer).length;
@@ -225,6 +226,22 @@ describe("panel API", () => {
     expect(res.json()).toEqual({ size: 1000 });
     const rows = await db.select().from(schema.auditLog).where(eq(schema.auditLog.action, "file.upload"));
     expect(rows[0]?.detail).toEqual({ path: "plugins/x.jar", bytes: 1000 });
+  });
+
+  it("runs a player action and audits it", async () => {
+    const cookie = await login("admin@example.com", "admin-pass");
+    const res = await app.inject({ method: "POST", url: "/api/servers/pw/players/action", headers: { cookie, ...H }, payload: { action: "op", name: "Alex" } });
+    expect(res.json()).toEqual({ answer: "Made Alex a server operator" });
+    const rows = await db.select().from(schema.auditLog).where(eq(schema.auditLog.action, "player.op"));
+    expect(rows).toHaveLength(1);
+  });
+
+  it("refuses a bad player name before reaching the node", async () => {
+    const cookie = await login("admin@example.com", "admin-pass");
+    agent.playerAction.mockClear();
+    const res = await app.inject({ method: "POST", url: "/api/servers/pw/players/action", headers: { cookie, ...H }, payload: { action: "op", name: "@a" } });
+    expect(res.statusCode).toBe(400);
+    expect(agent.playerAction).not.toHaveBeenCalled();
   });
 
   it("logs out", async () => {

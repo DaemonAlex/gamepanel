@@ -4,6 +4,7 @@ import type { PowerAction, ServerView } from "@gamepanel/shared";
 import { api } from "../api.js";
 import ConsolePanel from "../components/ConsolePanel.vue";
 import OverviewPanel from "../components/OverviewPanel.vue";
+import PlayersPanel from "../components/PlayersPanel.vue";
 import { stateOf, uptime } from "../format.js";
 
 const props = defineProps<{ id: string }>();
@@ -17,7 +18,7 @@ let timer: ReturnType<typeof setInterval> | undefined;
 const FilesPanel = defineAsyncComponent(() => import("../components/FilesPanel.vue"));
 
 // Tabs; the choice is kept in the address (#files) so a reload stays put.
-const tabs = ["overview", "console", "files"] as const;
+const tabs = ["overview", "console", "players", "files"] as const;
 type Tab = (typeof tabs)[number];
 const tab = ref<Tab>(tabs.includes(location.hash.slice(1) as Tab) ? (location.hash.slice(1) as Tab) : "overview");
 function pick(t: Tab) {
@@ -98,6 +99,7 @@ async function power(action: PowerAction) {
       <OverviewPanel v-if="tab === 'overview'" :server="server" />
 
       <ConsolePanel v-if="tab === 'console'" :id="server.id" class="panel" />
+      <PlayersPanel v-if="tab === 'players'" :id="server.id" />
       <FilesPanel v-if="tab === 'files'" :id="server.id" class="panel" />
     </template>
   </main>

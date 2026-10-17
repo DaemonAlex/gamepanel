@@ -2,7 +2,7 @@ import type { Readable } from "node:stream";
 import Fastify, { type FastifyInstance, type FastifyServerOptions } from "fastify";
 import websocket from "@fastify/websocket";
 import { ZodError } from "zod";
-import { consoleInSchema, powerActionSchema, serverIdSchema, serverSpecSchema, type ConsoleOut } from "@gamepanel/shared";
+import { consoleInSchema, playerActionSchema, powerActionSchema, serverIdSchema, serverSpecSchema, whitelistToggleSchema, type ConsoleOut } from "@gamepanel/shared";
 import { tokenMatches } from "./auth.js";
 import { FileError } from "./files.js";
 import { ImportError } from "./import.js";
@@ -45,6 +45,16 @@ export async function buildApp(token: string, servers: Servers, opts: FastifySer
     if (status.state !== "running" && status.state !== "starting") return reply.code(409).send({ error: "server is not running" });
     return servers.sample(id);
   });
+
+  app.get("/v1/servers/:id/players", async (req) => servers.players(parseId(req.params)));
+
+  app.post("/v1/servers/:id/players/action", async (req) => ({
+    answer: await servers.playerAction(parseId(req.params), playerActionSchema.parse(req.body)),
+  }));
+
+  app.post("/v1/servers/:id/players/whitelist", async (req) => ({
+    answer: await servers.setWhitelist(parseId(req.params), whitelistToggleSchema.parse(req.body).on),
+  }));
 
   app.get("/v1/servers/:id/info", async (req) => servers.info(parseId(req.params)));
 
