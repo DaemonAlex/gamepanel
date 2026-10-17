@@ -1,0 +1,19 @@
+[Unit]
+Description=Game panel node agent
+After=docker.service gamepanel-firewall.service
+Requires=docker.service gamepanel-firewall.service
+
+[Service]
+# Root because it drives Docker (root-equivalent anyway) and sets file owners.
+EnvironmentFile=/etc/gamepanel/agent.env
+ExecStart=/opt/node24/bin/node /opt/gamepanel/apps/agent/dist/main.js
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=yes
+ProtectSystem=strict
+ReadWritePaths=/srv/gamepanel
+ProtectHome=yes
+PrivateTmp=yes
+
+[Install]
+WantedBy=multi-user.target

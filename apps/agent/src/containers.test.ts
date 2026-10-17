@@ -13,6 +13,10 @@ const cfg: AgentConfig = {
   imageRepo: "itzg/minecraft-server",
   imageRelease: "2026.9.2",
   network: "gp-net",
+  bridgeName: "gp-br0",
+  subnet: "172.30.0.0/24",
+  backupRoot: "/srv/gamepanel/backups",
+  importLimits: { maxBytes: 2 ** 30, maxEntries: 1000 },
   bindIp: "10.20.20.10",
 };
 

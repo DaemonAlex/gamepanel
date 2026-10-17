@@ -16,6 +16,9 @@ export interface AgentConfig {
   backupRoot: string;
   importLimits: { maxBytes: number; maxEntries: number };
   network: string;
+  // Fixed bridge name and subnet for the game network, so the node firewall can name them.
+  bridgeName: string;
+  subnet: string;
   // The node address that game ports are published on.
   bindIp: string;
 }
@@ -55,6 +58,8 @@ export function loadConfig(env: Env = process.env): AgentConfig {
       maxEntries: Number(env.AGENT_IMPORT_MAX_ENTRIES ?? "500000"),
     },
     network: env.AGENT_MC_NETWORK ?? "gp-net",
+    bridgeName: env.AGENT_MC_BRIDGE ?? "gp-br0",
+    subnet: env.AGENT_MC_SUBNET ?? "172.30.0.0/24",
     bindIp: required(env, "AGENT_BIND_IP"),
   };
 }

@@ -55,7 +55,8 @@ export class Servers {
     await this.docker.createNetwork({
       Name: this.cfg.network,
       Driver: "bridge",
-      Options: { "com.docker.network.bridge.enable_icc": "false" },
+      Options: { "com.docker.network.bridge.enable_icc": "false", "com.docker.network.bridge.name": this.cfg.bridgeName },
+      IPAM: { Config: [{ Subnet: this.cfg.subnet }] },
       Labels: { [LABEL]: "network" },
     });
   }
