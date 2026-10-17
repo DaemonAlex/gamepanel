@@ -16,9 +16,10 @@ let timer: ReturnType<typeof setInterval> | undefined;
 
 // The file manager carries the code editor, so it loads only when opened.
 const FilesPanel = defineAsyncComponent(() => import("../components/FilesPanel.vue"));
+const SettingsPanel = defineAsyncComponent(() => import("../components/SettingsPanel.vue"));
 
 // Tabs; the choice is kept in the address (#files) so a reload stays put.
-const tabs = ["overview", "console", "players", "files"] as const;
+const tabs = ["overview", "console", "players", "settings", "files"] as const;
 type Tab = (typeof tabs)[number];
 const tab = ref<Tab>(tabs.includes(location.hash.slice(1) as Tab) ? (location.hash.slice(1) as Tab) : "overview");
 function pick(t: Tab) {
@@ -100,6 +101,7 @@ async function power(action: PowerAction) {
 
       <ConsolePanel v-if="tab === 'console'" :id="server.id" class="panel" />
       <PlayersPanel v-if="tab === 'players'" :id="server.id" />
+      <SettingsPanel v-if="tab === 'settings'" :id="server.id" :running="isUp" @restarted="load" />
       <FilesPanel v-if="tab === 'files'" :id="server.id" class="panel" />
     </template>
   </main>

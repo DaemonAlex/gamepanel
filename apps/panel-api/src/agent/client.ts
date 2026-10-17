@@ -58,6 +58,9 @@ export class AgentClient {
   node = () => this.call<NodeInfo>("GET", "/v1/node");
   list = () => this.call<ServerStatus[]>("GET", "/v1/servers");
   status = (id: string) => this.call<ServerStatus>("GET", `/v1/servers/${id}`);
+  properties = (id: string) => this.call<{ values: Record<string, string> }>("GET", `/v1/servers/${id}/properties`);
+  setProperties = (id: string, changes: Record<string, string>) =>
+    this.call<{ backup: string; changed: string[] }>("PUT", `/v1/servers/${id}/properties`, { changes });
   players = (id: string) => this.call<PlayersView>("GET", `/v1/servers/${id}/players`);
   playerAction = (id: string, a: PlayerAction) => this.call<{ answer: string }>("POST", `/v1/servers/${id}/players/action`, a);
   setWhitelist = (id: string, on: boolean) => this.call<{ answer: string }>("POST", `/v1/servers/${id}/players/whitelist`, { on });

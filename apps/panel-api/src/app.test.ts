@@ -33,6 +33,8 @@ function fakeAgent(memoryBytes = 16 * GiB) {
     remove: vi.fn(async () => {}),
     listFiles: vi.fn(async () => [{ name: "server.properties", type: "file", size: 9, modified: "2026-10-17T00:00:00Z" }]),
     writeFile: vi.fn(async () => {}),
+    properties: vi.fn(async () => ({ values: { "max-players": "20" } })),
+    setProperties: vi.fn(async () => ({ backup: "/b/x", changed: ["max-players"] })),
     playerAction: vi.fn(async () => ({ answer: "Made Alex a server operator" })),
     async uploadChunk(_id: string, _path: string, _offset: number, _done: boolean, body: NodeJS.ReadableStream) {
       let size = 0;
@@ -242,6 +244,17 @@ describe("panel API", () => {
     const res = await app.inject({ method: "POST", url: "/api/servers/pw/players/action", headers: { cookie, ...H }, payload: { action: "op", name: "@a" } });
     expect(res.statusCode).toBe(400);
     expect(agent.playerAction).not.toHaveBeenCalled();
+  });
+
+  it("saves settings, audits the change, and refuses managed keys", async () => {
+    const cookie = await login("admin@example.com", "admin-pass");
+    const bad = await app.inject({ method: "PUT", url: "/api/servers/pw/properties", headers: { cookie, ...H }, payload: { changes: { "server-port": "1" } } });
+    expect(bad.statusCode).toBe(400);
+    expect(agent.setProperties).not.toHaveBeenCalled();
+    const ok = await app.inject({ method: "PUT", url: "/api/servers/pw/properties", headers: { cookie, ...H }, payload: { changes: { "max-players": "30" } } });
+    expect(ok.statusCode).toBe(200);
+    const rows = await db.select().from(schema.auditLog).where(eq(schema.auditLog.action, "settings.save"));
+    expect(rows[0]?.detail).toEqual({ diff: { "max-players": { from: "20", to: "30" } }, backup: "/b/x" });
   });
 
   it("logs out", async () => {

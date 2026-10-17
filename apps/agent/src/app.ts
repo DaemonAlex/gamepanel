@@ -2,7 +2,7 @@ import type { Readable } from "node:stream";
 import Fastify, { type FastifyInstance, type FastifyServerOptions } from "fastify";
 import websocket from "@fastify/websocket";
 import { ZodError } from "zod";
-import { consoleInSchema, playerActionSchema, powerActionSchema, serverIdSchema, serverSpecSchema, whitelistToggleSchema, type ConsoleOut } from "@gamepanel/shared";
+import { consoleInSchema, playerActionSchema, propertyChangesSchema, powerActionSchema, serverIdSchema, serverSpecSchema, whitelistToggleSchema, type ConsoleOut } from "@gamepanel/shared";
 import { tokenMatches } from "./auth.js";
 import { FileError } from "./files.js";
 import { ImportError } from "./import.js";
@@ -55,6 +55,10 @@ export async function buildApp(token: string, servers: Servers, opts: FastifySer
   app.post("/v1/servers/:id/players/whitelist", async (req) => ({
     answer: await servers.setWhitelist(parseId(req.params), whitelistToggleSchema.parse(req.body).on),
   }));
+
+  app.get("/v1/servers/:id/properties", async (req) => ({ values: await servers.properties(parseId(req.params)) }));
+
+  app.put("/v1/servers/:id/properties", async (req) => servers.setProperties(parseId(req.params), propertyChangesSchema.parse(req.body).changes));
 
   app.get("/v1/servers/:id/info", async (req) => servers.info(parseId(req.params)));
 

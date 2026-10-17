@@ -4,11 +4,14 @@ import { cpus, totalmem } from "node:os";
 import { dirname } from "node:path";
 import { PassThrough, type Readable } from "node:stream";
 import Docker from "dockerode";
+import { checkProperty } from "@gamepanel/shared";
 import type { NodeInfo, PlayerAction, PlayersView, PowerAction, ServerId, ServerInfo, ServerSample, ServerSpec, ServerState, ServerStats, ServerStatus } from "@gamepanel/shared";
 import { readFile } from "node:fs/promises";
-import { ServerFiles } from "./files.js";
-import { folderBytes, listJars, parseProperties } from "./info.js";
+import { FileError, ServerFiles } from "./files.js";
+import { folderBytes, listJars } from "./info.js";
 import { commandFor, readPlayerFiles } from "./players.js";
+import { readProperties, withoutSecrets, writeProperties } from "./properties-file.js";
+import { copyFile } from "node:fs/promises";
 import { parseList, parseMspt, parseTps, plain, rcon } from "./rcon.js";
 import { chownTree, detect, extractArchive, findLayout, fixServerPropertiesFile, type ArchiveFormat, type Detected } from "./import.js";
 import type { AgentConfig } from "./config.js";
@@ -206,7 +209,7 @@ export class Servers {
   async info(id: ServerId): Promise<ServerInfo> {
     const files = this.files(id);
     const dir = serverDir(this.cfg, id);
-    const props = parseProperties(await files.readText("server.properties").catch(() => ""));
+    const props = readProperties(await files.readText("server.properties").catch(() => ""));
 
     let build: string | null = null;
     try {
@@ -242,7 +245,7 @@ export class Servers {
     }
 
     return {
-      properties: props,
+      properties: withoutSecrets(props),
       build,
       java: image?.match(/java(\d+)/)?.[1] ?? null,
       image,
@@ -273,6 +276,32 @@ export class Servers {
       diskBytes: await folderBytes(serverDir(this.cfg, id)),
       restartCount: c.RestartCount ?? 0,
     };
+  }
+
+  async properties(id: ServerId): Promise<Record<string, string>> {
+    return withoutSecrets(readProperties(await this.files(id).readText("server.properties").catch(() => "")));
+  }
+
+  // Save settings. Every change is checked against the allowed fields; the old
+  // file is copied to backups/settings/<id>/ first. Takes effect on restart.
+  async setProperties(id: ServerId, changes: Record<string, string>): Promise<{ backup: string; changed: string[] }> {
+    const clean: Record<string, string> = {};
+    for (const [k, v] of Object.entries(changes)) {
+      const r = checkProperty(k, v);
+      if (!r.ok) throw new FileError(r.error);
+      clean[k] = r.value;
+    }
+    const files = this.files(id);
+    const current = await files.readText("server.properties").catch(() => "");
+    const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+    const dir = `${this.cfg.backupRoot}/settings/${id}`;
+    await mkdir(dir, { recursive: true, mode: 0o750 });
+    const backup = `${dir}/server.properties.${stamp}`;
+    if (current) {
+      await copyFile(await files.safeFile("server.properties"), backup);
+    }
+    await files.writeText("server.properties", writeProperties(current, clean));
+    return { backup, changed: Object.keys(clean) };
   }
 
   // Run commands over RCON on a running server and return the plain answers.

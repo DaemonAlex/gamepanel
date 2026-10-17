@@ -6,18 +6,6 @@ import type { ServerFiles } from "./files.js";
 // Reading what a server folder says about itself. Everything goes through
 // ServerFiles, so links planted in the folder cannot point the agent elsewhere.
 
-export function parseProperties(text: string): Record<string, string> {
-  const out: Record<string, string> = {};
-  for (const line of text.split(/\r?\n/)) {
-    if (!line || line.startsWith("#") || line.startsWith("!")) continue;
-    const i = line.indexOf("=");
-    if (i < 0) continue;
-    // Java properties escape ':' and '=' with a backslash.
-    out[line.slice(0, i).trim()] = line.slice(i + 1).trim().replace(/\\(.)/g, "$1");
-  }
-  return out;
-}
-
 // Total size of a folder without following links. Cached per folder for a few
 // minutes: walking a big world is slow.
 const sizeCache = new Map<string, { at: number; bytes: number }>();

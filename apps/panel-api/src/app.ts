@@ -14,6 +14,8 @@ import {
   powerBodySchema,
   metricRanges,
   playerActionSchema,
+  checkProperty,
+  propertyChangesSchema,
   whitelistToggleSchema,
   type Dashboard,
   type MetricRange,
@@ -428,6 +430,32 @@ export async function buildApp({ cfg, db, nodes }: AppDeps, opts: { logger?: boo
       void audit(db, { userId: me!.id, action: "console.command", serverId: target.row.id, ip: req.ip, detail: { cmd: parsed.data.cmd } });
     });
     socket.on("close", () => upstream.close());
+  });
+
+  // --- settings ------------------------------------------------------------------
+
+  app.get("/api/servers/:id/properties", async (req) => {
+    const me = requireMe(req);
+    const { row, node } = await serverFor(me, (req.params as { id: string }).id);
+    return nodes.client(node).properties(row.id);
+  });
+
+  app.put("/api/servers/:id/properties", async (req) => {
+    const me = requireMe(req);
+    const ip = req.ip;
+    const { row, node } = await serverFor(me, (req.params as { id: string }).id);
+    const { changes } = propertyChangesSchema.parse(req.body);
+    // Check here too, so a bad value never reaches the node.
+    for (const [k, v] of Object.entries(changes)) {
+      const r = checkProperty(k, v);
+      if (!r.ok) throw new HttpError(400, r.error);
+    }
+    const client = nodes.client(node);
+    const before = (await client.properties(row.id)).values;
+    const result = await client.setProperties(row.id, changes);
+    const diff = Object.fromEntries(Object.entries(changes).map(([k, v]) => [k, { from: before[k] ?? null, to: v }]));
+    await audit(db, { userId: me.id, action: "settings.save", serverId: row.id, ip, detail: { diff, backup: result.backup } });
+    return result;
   });
 
   // --- players -------------------------------------------------------------------

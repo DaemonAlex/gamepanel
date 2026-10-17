@@ -33,6 +33,9 @@ export const api = {
   server: (id: string) => call<ServerView>("GET", `/api/servers/${encodeURIComponent(id)}`),
   metrics: (id: string, range: MetricRange) => call<MetricPoint[]>("GET", `/api/servers/${encodeURIComponent(id)}/metrics?range=${range}`),
   nodeMetrics: (id: string, range: MetricRange) => call<NodeMetricPoint[]>("GET", `/api/nodes/${encodeURIComponent(id)}/metrics?range=${range}`),
+  properties: (id: string) => call<{ values: Record<string, string> }>("GET", `/api/servers/${encodeURIComponent(id)}/properties`),
+  setProperties: (id: string, changes: Record<string, string>) =>
+    call<{ backup: string; changed: string[] }>("PUT", `/api/servers/${encodeURIComponent(id)}/properties`, { changes }),
   players: (id: string) => call<PlayersView>("GET", `/api/servers/${encodeURIComponent(id)}/players`),
   playerAction: (id: string, a: PlayerAction) => call<{ answer: string }>("POST", `/api/servers/${encodeURIComponent(id)}/players/action`, a),
   setWhitelist: (id: string, on: boolean) => call<{ answer: string }>("POST", `/api/servers/${encodeURIComponent(id)}/players/whitelist`, { on }),
