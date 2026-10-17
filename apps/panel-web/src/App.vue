@@ -16,7 +16,7 @@ async function logout() {
       <span>Game Panel</span>
     </RouterLink>
     <span class="label coords" aria-hidden="true">X 0 &middot; Z 0</span>
-    <span class="who muted">{{ session.me.value.email }} &middot; {{ session.me.value.role }}</span>
+    <RouterLink to="/account" class="who muted">{{ session.me.value.email }} &middot; {{ session.me.value.role }}</RouterLink>
     <button class="btn" type="button" @click="logout">Log out</button>
   </header>
   <RouterView />

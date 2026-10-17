@@ -27,6 +27,7 @@ async function call<T>(method: string, path: string, body?: unknown): Promise<T>
 export const api = {
   me: () => call<Me>("GET", "/api/me"),
   login: (email: string, password: string) => call<Me>("POST", "/api/auth/login", { email, password }),
+  changePassword: (current: string, next: string) => call<{ ok: true }>("POST", "/api/auth/password", { current, next }),
   logout: () => call<{ ok: true }>("POST", "/api/auth/logout", {}),
   dashboard: () => call<Dashboard>("GET", "/api/dashboard"),
   server: (id: string) => call<ServerView>("GET", `/api/servers/${encodeURIComponent(id)}`),

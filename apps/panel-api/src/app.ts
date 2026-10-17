@@ -3,10 +3,11 @@ import cookie from "@fastify/cookie";
 import rateLimit from "@fastify/rate-limit";
 import fastifyStatic from "@fastify/static";
 import websocket from "@fastify/websocket";
-import { and, eq, gt } from "drizzle-orm";
+import { and, eq, gt, ne } from "drizzle-orm";
 import { ZodError } from "zod";
 import {
   broadcastSchema,
+  changePasswordSchema,
   consoleInSchema,
   loginSchema,
   newServerSchema,
@@ -17,7 +18,7 @@ import {
   type ServerView,
 } from "@gamepanel/shared";
 import { AgentError } from "./agent/client.js";
-import { newSessionId, sessionHash, verifyPassword } from "./auth/crypto.js";
+import { hashPassword, newSessionId, sessionHash, verifyPassword } from "./auth/crypto.js";
 import type { PanelConfig } from "./config.js";
 import { schema, type Db } from "./db/index.js";
 import { containerBytesFor, memoryFits, nextFreePort } from "./services/allocation.js";
@@ -162,6 +163,23 @@ export async function buildApp({ cfg, db, nodes }: AppDeps, opts: { logger?: boo
   });
 
   app.get("/api/me", async (req) => requireMe(req));
+
+  // Change your own password. Other sessions are logged out; this one stays.
+  app.post(
+    "/api/auth/password",
+    { config: { rateLimit: { max: 5, timeWindow: "1 minute", keyGenerator: (req: FastifyRequest) => req.ip } } },
+    async (req) => {
+      const me = requireMe(req);
+      const { current, next } = changePasswordSchema.parse(req.body);
+      const [user] = await db.select().from(schema.users).where(eq(schema.users.id, me.id));
+      if (!user || !(await verifyPassword(user.passwordHash, current))) throw new HttpError(403, "current password is wrong");
+      await db.update(schema.users).set({ passwordHash: await hashPassword(next) }).where(eq(schema.users.id, me.id));
+      const keep = sessionHash(req.cookies[COOKIE] ?? "");
+      await db.delete(schema.sessions).where(and(eq(schema.sessions.userId, me.id), ne(schema.sessions.idHash, keep)));
+      await audit(db, { userId: me.id, action: "password.change", ip: req.ip });
+      return { ok: true };
+    },
+  );
 
   // --- dashboard ------------------------------------------------------------
 

@@ -16,6 +16,11 @@ export const loginSchema = z.object({
   password: z.string().min(1).max(500),
 });
 
+export const changePasswordSchema = z.object({
+  current: z.string().min(1).max(500),
+  next: z.string().min(12, "use at least 12 characters").max(500),
+});
+
 export const newServerSchema = z.object({
   name: z.string().trim().min(1).max(40),
   type: serverTypeSchema,

@@ -173,6 +173,20 @@ describe("panel API", () => {
     expect(agent.command).toHaveBeenCalledWith("pw", "say restart in 5");
   });
 
+  it("changes the password and logs out other sessions", async () => {
+    const other = await login("admin@example.com", "admin-pass");
+    const cookie = await login("admin@example.com", "admin-pass");
+    const wrong = await app.inject({ method: "POST", url: "/api/auth/password", headers: { cookie, ...H }, payload: { current: "nope", next: "a-long-new-password" } });
+    expect(wrong.statusCode).toBe(403);
+    const short = await app.inject({ method: "POST", url: "/api/auth/password", headers: { cookie, ...H }, payload: { current: "admin-pass", next: "short" } });
+    expect(short.statusCode).toBe(400);
+    const ok = await app.inject({ method: "POST", url: "/api/auth/password", headers: { cookie, ...H }, payload: { current: "admin-pass", next: "a-long-new-password" } });
+    expect(ok.statusCode).toBe(200);
+    expect((await app.inject({ url: "/api/me", headers: { cookie } })).statusCode).toBe(200);
+    expect((await app.inject({ url: "/api/me", headers: { cookie: other } })).statusCode).toBe(401);
+    await login("admin@example.com", "a-long-new-password");
+  });
+
   it("logs out", async () => {
     const cookie = await login("admin@example.com", "admin-pass");
     await app.inject({ method: "POST", url: "/api/auth/logout", headers: { cookie, ...H } });
