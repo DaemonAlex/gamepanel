@@ -49,6 +49,8 @@ export const servers = pgTable("servers", {
   port: integer("port").notNull(),
   // Hostname players use, when DNS is set up for it.
   hostname: text("hostname"),
+  // How many backups to keep; older ones are removed after each good backup.
+  backupKeep: integer("backup_keep").notNull().default(7),
   eulaAcceptedBy: text("eula_accepted_by").notNull().references(() => users.id),
   eulaAcceptedAt: timestamp("eula_accepted_at", { withTimezone: true }).notNull(),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
@@ -88,3 +90,19 @@ export const nodeSamples = pgTable("node_samples", {
   diskFreeBytes: bigint("disk_free_bytes", { mode: "number" }).notNull(),
   running: integer("running").notNull(),
 }, (t) => [index("node_samples_node_at").on(t.nodeId, t.at)]);
+
+export const schedules = pgTable("schedules", {
+  id: text("id").primaryKey(),
+  serverId: text("server_id").notNull().references(() => servers.id, { onDelete: "cascade" }),
+  action: text("action").notNull(),
+  payload: text("payload").notNull().default(""),
+  kind: text("kind").notNull(),
+  minutes: integer("minutes").notNull().default(60),
+  time: text("time").notNull().default("04:00"),
+  days: jsonb("days").$type<number[]>().notNull(),
+  tz: text("tz").notNull().default("UTC"),
+  enabled: boolean("enabled").notNull().default(true),
+  lastRunAt: timestamp("last_run_at", { withTimezone: true }),
+  lastResult: text("last_result"),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+}, (t) => [index("schedules_server").on(t.serverId)]);

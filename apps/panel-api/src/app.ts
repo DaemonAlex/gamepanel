@@ -3,7 +3,8 @@ import cookie from "@fastify/cookie";
 import rateLimit from "@fastify/rate-limit";
 import fastifyStatic from "@fastify/static";
 import websocket from "@fastify/websocket";
-import { and, eq, gt, ne } from "drizzle-orm";
+import { and, asc, eq, gt, ne } from "drizzle-orm";
+import { randomUUID } from "node:crypto";
 import { ZodError } from "zod";
 import {
   broadcastSchema,
@@ -14,6 +15,10 @@ import {
   powerBodySchema,
   metricRanges,
   playerActionSchema,
+  backupNameSchema,
+  scheduleSchema,
+  type BackupsView,
+  type ScheduleView,
   checkProperty,
   propertyChangesSchema,
   whitelistToggleSchema,
@@ -430,6 +435,127 @@ export async function buildApp({ cfg, db, nodes }: AppDeps, opts: { logger?: boo
       void audit(db, { userId: me!.id, action: "console.command", serverId: target.row.id, ip: req.ip, detail: { cmd: parsed.data.cmd } });
     });
     socket.on("close", () => upstream.close());
+  });
+
+  // --- backups -------------------------------------------------------------------
+
+  app.get("/api/servers/:id/backups", async (req): Promise<BackupsView> => {
+    const me = requireMe(req);
+    const { row, node } = await serverFor(me, (req.params as { id: string }).id);
+    return { ...(await nodes.client(node).backups(row.id)), keep: row.backupKeep };
+  });
+
+  app.post("/api/servers/:id/backups", async (req) => {
+    const me = requireMe(req);
+    const ip = req.ip;
+    const { row, node } = await serverFor(me, (req.params as { id: string }).id);
+    const job = await nodes.client(node).startBackup(row.id, "manual", row.backupKeep);
+    await audit(db, { userId: me.id, action: "backup.start", serverId: row.id, ip, detail: { job: job.id } });
+    return job;
+  });
+
+  app.post("/api/servers/:id/backups/restore", async (req) => {
+    const me = requireMe(req);
+    const ip = req.ip;
+    const { row, node } = await serverFor(me, (req.params as { id: string }).id);
+    const name = backupNameSchema.parse((req.body as { name?: unknown } | undefined)?.name);
+    const job = await nodes.client(node).restoreBackup(row.id, name);
+    await audit(db, { userId: me.id, action: "backup.restore", serverId: row.id, ip, detail: { name, job: job.id } });
+    return job;
+  });
+
+  app.put("/api/servers/:id/backups/keep", async (req) => {
+    const me = requireMe(req);
+    const ip = req.ip;
+    const { row, node } = await serverFor(me, (req.params as { id: string }).id);
+    const keep = Number((req.body as { keep?: unknown } | undefined)?.keep);
+    if (!Number.isInteger(keep) || keep < 1 || keep > 100) throw new HttpError(400, "keep a number of backups from 1 to 100");
+    await db.update(schema.servers).set({ backupKeep: keep }).where(eq(schema.servers.id, row.id));
+    const { removed } = await nodes.client(node).pruneBackups(row.id, keep);
+    await audit(db, { userId: me.id, action: "backup.keep", serverId: row.id, ip, detail: { from: row.backupKeep, to: keep, removed } });
+    return { keep, removed };
+  });
+
+  app.delete("/api/servers/:id/backups/:name", async (req) => {
+    const me = requireMe(req);
+    const ip = req.ip;
+    const { row, node } = await serverFor(me, (req.params as { id: string }).id);
+    const name = backupNameSchema.parse((req.params as { name?: unknown }).name);
+    await nodes.client(node).removeBackup(row.id, name);
+    await audit(db, { userId: me.id, action: "backup.delete", serverId: row.id, ip, detail: { name } });
+    return { ok: true };
+  });
+
+  app.get("/api/servers/:id/backups/:name/download", async (req, reply) => {
+    const me = requireMe(req);
+    const ip = req.ip;
+    const { row, node } = await serverFor(me, (req.params as { id: string }).id);
+    const name = backupNameSchema.parse((req.params as { name?: unknown }).name);
+    const res = await nodes.client(node).downloadBackup(row.id, name);
+    for (const h of ["content-type", "content-length", "content-disposition"]) {
+      const v = res.headers[h];
+      if (typeof v === "string") reply.header(h, v);
+    }
+    await audit(db, { userId: me.id, action: "backup.download", serverId: row.id, ip, detail: { name } });
+    return reply.send(res.body);
+  });
+
+  // --- schedules -----------------------------------------------------------------
+
+  const toView = (r: typeof schema.schedules.$inferSelect): ScheduleView => ({
+    id: r.id,
+    serverId: r.serverId,
+    action: r.action as ScheduleView["action"],
+    payload: r.payload,
+    kind: r.kind as ScheduleView["kind"],
+    minutes: r.minutes,
+    time: r.time,
+    days: r.days,
+    tz: r.tz,
+    enabled: r.enabled,
+    lastRunAt: r.lastRunAt?.toISOString() ?? null,
+    lastResult: r.lastResult,
+  });
+
+  app.get("/api/servers/:id/schedules", async (req) => {
+    const me = requireMe(req);
+    const { row } = await serverFor(me, (req.params as { id: string }).id);
+    const rows = await db.select().from(schema.schedules).where(eq(schema.schedules.serverId, row.id)).orderBy(asc(schema.schedules.createdAt));
+    return rows.map(toView);
+  });
+
+  app.post("/api/servers/:id/schedules", async (req, reply) => {
+    const me = requireMe(req);
+    const ip = req.ip;
+    const { row } = await serverFor(me, (req.params as { id: string }).id);
+    const s = scheduleSchema.parse(req.body);
+    if (!Intl.supportedValuesOf("timeZone").includes(s.tz) && s.tz !== "UTC") throw new HttpError(400, "unknown time zone");
+    const [created] = await db.insert(schema.schedules).values({ id: randomUUID(), serverId: row.id, ...s }).returning();
+    await audit(db, { userId: me.id, action: "schedule.create", serverId: row.id, ip, detail: s });
+    return reply.code(201).send(toView(created!));
+  });
+
+  app.put("/api/servers/:id/schedules/:sid", async (req) => {
+    const me = requireMe(req);
+    const ip = req.ip;
+    const { row } = await serverFor(me, (req.params as { id: string }).id);
+    const sid = String((req.params as { sid?: unknown }).sid);
+    const s = scheduleSchema.parse(req.body);
+    const [updated] = await db.update(schema.schedules).set(s).where(and(eq(schema.schedules.id, sid), eq(schema.schedules.serverId, row.id))).returning();
+    if (!updated) throw new HttpError(404, "schedule not found");
+    await audit(db, { userId: me.id, action: "schedule.update", serverId: row.id, ip, detail: { id: sid, ...s } });
+    return toView(updated);
+  });
+
+  app.delete("/api/servers/:id/schedules/:sid", async (req) => {
+    const me = requireMe(req);
+    const ip = req.ip;
+    const { row } = await serverFor(me, (req.params as { id: string }).id);
+    const sid = String((req.params as { sid?: unknown }).sid);
+    const gone = await db.delete(schema.schedules).where(and(eq(schema.schedules.id, sid), eq(schema.schedules.serverId, row.id))).returning();
+    if (!gone.length) throw new HttpError(404, "schedule not found");
+    await audit(db, { userId: me.id, action: "schedule.delete", serverId: row.id, ip, detail: { id: sid } });
+    return { ok: true };
   });
 
   // --- settings ------------------------------------------------------------------

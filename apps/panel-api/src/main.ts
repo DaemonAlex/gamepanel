@@ -6,6 +6,7 @@ import { buildApp } from "./app.js";
 import { loadConfig } from "./config.js";
 import { schema, type Db } from "./db/index.js";
 import { startSampler } from "./services/metrics.js";
+import { startScheduler } from "./services/schedules.js";
 import { Nodes } from "./services/nodes.js";
 
 const cfg = loadConfig();
@@ -20,3 +21,5 @@ const app = await buildApp({ cfg, db, nodes }, { logger: true });
 await app.listen({ host: cfg.host, port: cfg.port });
 // Graph and warning history: every running server and node, every 30 seconds.
 startSampler(db, nodes, (err) => app.log.error(err));
+// Scheduled backups, restarts, saves, commands and messages.
+startScheduler(db, nodes, (err) => app.log.error(err));

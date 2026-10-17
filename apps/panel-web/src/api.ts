@@ -1,4 +1,4 @@
-import type { Dashboard, Me, MetricPoint, MetricRange, NewServer, NodeMetricPoint, PlayerAction, PlayersView, PowerAction, ServerInfo, ServerView } from "@gamepanel/shared";
+import type { BackupJob, BackupsView, ScheduleInput, ScheduleView, Dashboard, Me, MetricPoint, MetricRange, NewServer, NodeMetricPoint, PlayerAction, PlayersView, PowerAction, ServerInfo, ServerView } from "@gamepanel/shared";
 
 // Talking to the panel API. Every change carries the x-gamepanel header the API requires.
 
@@ -33,6 +33,16 @@ export const api = {
   server: (id: string) => call<ServerView>("GET", `/api/servers/${encodeURIComponent(id)}`),
   metrics: (id: string, range: MetricRange) => call<MetricPoint[]>("GET", `/api/servers/${encodeURIComponent(id)}/metrics?range=${range}`),
   nodeMetrics: (id: string, range: MetricRange) => call<NodeMetricPoint[]>("GET", `/api/nodes/${encodeURIComponent(id)}/metrics?range=${range}`),
+  backups: (id: string) => call<BackupsView>("GET", `/api/servers/${encodeURIComponent(id)}/backups`),
+  startBackup: (id: string) => call<BackupJob>("POST", `/api/servers/${encodeURIComponent(id)}/backups`, {}),
+  restoreBackup: (id: string, name: string) => call<BackupJob>("POST", `/api/servers/${encodeURIComponent(id)}/backups/restore`, { name }),
+  removeBackup: (id: string, name: string) => call<{ ok: true }>("DELETE", `/api/servers/${encodeURIComponent(id)}/backups/${encodeURIComponent(name)}`),
+  setBackupKeep: (id: string, keep: number) => call<{ keep: number }>("PUT", `/api/servers/${encodeURIComponent(id)}/backups/keep`, { keep }),
+  backupDownloadUrl: (id: string, name: string) => `/api/servers/${encodeURIComponent(id)}/backups/${encodeURIComponent(name)}/download`,
+  schedules: (id: string) => call<ScheduleView[]>("GET", `/api/servers/${encodeURIComponent(id)}/schedules`),
+  createSchedule: (id: string, s: ScheduleInput) => call<ScheduleView>("POST", `/api/servers/${encodeURIComponent(id)}/schedules`, s),
+  updateSchedule: (id: string, sid: string, s: ScheduleInput) => call<ScheduleView>("PUT", `/api/servers/${encodeURIComponent(id)}/schedules/${encodeURIComponent(sid)}`, s),
+  deleteSchedule: (id: string, sid: string) => call<{ ok: true }>("DELETE", `/api/servers/${encodeURIComponent(id)}/schedules/${encodeURIComponent(sid)}`),
   properties: (id: string) => call<{ values: Record<string, string> }>("GET", `/api/servers/${encodeURIComponent(id)}/properties`),
   setProperties: (id: string, changes: Record<string, string>) =>
     call<{ backup: string; changed: string[] }>("PUT", `/api/servers/${encodeURIComponent(id)}/properties`, { changes }),

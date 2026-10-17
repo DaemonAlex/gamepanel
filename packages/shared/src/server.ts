@@ -131,3 +131,29 @@ export interface PlayersView {
   // Everyone the server has seen (usercache.json), newest first.
   known: (PlayerRef & { lastSeen: string | null })[];
 }
+
+// --- backups ---
+
+export interface BackupEntry {
+  // File name, e.g. "2026-10-17T10-00-00-000Z.tar.gz"; also its id.
+  name: string;
+  bytes: number;
+  createdAt: string;
+  // Who made it: "manual", "schedule" or "pre-restore".
+  reason: string;
+}
+
+export interface BackupJob {
+  id: string;
+  serverId: string;
+  kind: "backup" | "restore";
+  state: "running" | "done" | "failed";
+  startedAt: string;
+  finishedAt?: string;
+  // Bytes written so far (backup) or the archive size (restore).
+  bytes: number;
+  backup?: string;
+  error?: string;
+}
+
+export const backupNameSchema = z.string().regex(/^[0-9TZ-]+(?:-[a-z-]+)?\.tar\.gz$/, "not a backup name");

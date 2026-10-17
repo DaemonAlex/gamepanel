@@ -1,7 +1,7 @@
 import type { Readable } from "node:stream";
 import { Agent, request } from "undici";
 import WebSocket from "ws";
-import type { NodeInfo, PlayerAction, PlayersView, PowerAction, ServerInfo, ServerSample, ServerSpec, ServerStats, ServerStatus } from "@gamepanel/shared";
+import type { BackupEntry, BackupJob, NodeInfo, PlayerAction, PlayersView, PowerAction, ServerInfo, ServerSample, ServerSpec, ServerStats, ServerStatus } from "@gamepanel/shared";
 
 // Talking to one node's agent. TLS trusts only that node's own certificate,
 // and every call carries the node's token.
@@ -58,6 +58,23 @@ export class AgentClient {
   node = () => this.call<NodeInfo>("GET", "/v1/node");
   list = () => this.call<ServerStatus[]>("GET", "/v1/servers");
   status = (id: string) => this.call<ServerStatus>("GET", `/v1/servers/${id}`);
+  backups = (id: string) => this.call<{ backups: BackupEntry[]; jobs: BackupJob[] }>("GET", `/v1/servers/${id}/backups`);
+  startBackup = (id: string, reason: "manual" | "schedule", keep: number) => this.call<BackupJob>("POST", `/v1/servers/${id}/backups`, { reason, keep });
+  restoreBackup = (id: string, name: string) => this.call<BackupJob>("POST", `/v1/servers/${id}/backups/restore`, { name });
+  pruneBackups = (id: string, keep: number) => this.call<{ removed: string[] }>("POST", `/v1/servers/${id}/backups/prune`, { keep });
+  removeBackup = (id: string, name: string) => this.call<void>("DELETE", `/v1/servers/${id}/backups/${encodeURIComponent(name)}`);
+  async downloadBackup(id: string, name: string) {
+    const res = await request(`${this.target.url}/v1/servers/${id}/backups/${encodeURIComponent(name)}/download`, {
+      method: "GET",
+      dispatcher: this.dispatcher,
+      headers: { authorization: `Bearer ${this.target.token}` },
+    });
+    if (res.statusCode >= 400) {
+      const text = await res.body.text();
+      throw new AgentError((JSON.parse(text || "{}") as { error?: string }).error ?? text, res.statusCode);
+    }
+    return { headers: res.headers, body: res.body };
+  }
   properties = (id: string) => this.call<{ values: Record<string, string> }>("GET", `/v1/servers/${id}/properties`);
   setProperties = (id: string, changes: Record<string, string>) =>
     this.call<{ backup: string; changed: string[] }>("PUT", `/v1/servers/${id}/properties`, { changes });

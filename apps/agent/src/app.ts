@@ -2,8 +2,9 @@ import type { Readable } from "node:stream";
 import Fastify, { type FastifyInstance, type FastifyServerOptions } from "fastify";
 import websocket from "@fastify/websocket";
 import { ZodError } from "zod";
-import { consoleInSchema, playerActionSchema, propertyChangesSchema, powerActionSchema, serverIdSchema, serverSpecSchema, whitelistToggleSchema, type ConsoleOut } from "@gamepanel/shared";
+import { backupNameSchema, consoleInSchema, playerActionSchema, propertyChangesSchema, powerActionSchema, serverIdSchema, serverSpecSchema, whitelistToggleSchema, type ConsoleOut } from "@gamepanel/shared";
 import { tokenMatches } from "./auth.js";
+import { BackupError } from "./backups.js";
 import { FileError } from "./files.js";
 import { ImportError } from "./import.js";
 import { ConflictError, type Servers } from "./servers.js";
@@ -28,6 +29,7 @@ export async function buildApp(token: string, servers: Servers, opts: FastifySer
     if (err instanceof ConflictError) return reply.code(409).send({ error: err.message });
     if (err instanceof ImportError) return reply.code(422).send({ error: err.message });
     if (err instanceof FileError) return reply.code(err.status).send({ error: err.message });
+    if (err instanceof BackupError) return reply.code(err.status).send({ error: err.message });
     if (err instanceof ZodError) return reply.code(400).send({ error: "invalid request" });
     app.log.error(err);
     return reply.code(500).send({ error: "agent error" });
@@ -59,6 +61,47 @@ export async function buildApp(token: string, servers: Servers, opts: FastifySer
   app.get("/v1/servers/:id/properties", async (req) => ({ values: await servers.properties(parseId(req.params)) }));
 
   app.put("/v1/servers/:id/properties", async (req) => servers.setProperties(parseId(req.params), propertyChangesSchema.parse(req.body).changes));
+
+  // --- backups ---------------------------------------------------------------
+  const bname = (params: unknown) => backupNameSchema.parse((params as { name?: unknown }).name);
+
+  app.get("/v1/servers/:id/backups", async (req) => {
+    const id = parseId(req.params);
+    return { backups: await servers.backups.list(id), jobs: servers.backups.jobsFor(id) };
+  });
+
+  app.post("/v1/servers/:id/backups", async (req) => {
+    const { reason, keep } = (req.body ?? {}) as { reason?: unknown; keep?: unknown };
+    const k = keep === undefined ? undefined : Number(keep);
+    if (k !== undefined && (!Number.isInteger(k) || k < 1 || k > 1000)) throw new BackupError("keep must be 1 to 1000", 400);
+    return servers.backups.start(parseId(req.params), reason === "schedule" ? "schedule" : "manual", k);
+  });
+
+  app.post("/v1/servers/:id/backups/restore", async (req) => {
+    const { name } = (req.body ?? {}) as { name?: unknown };
+    return servers.backups.restore(parseId(req.params), backupNameSchema.parse(name));
+  });
+
+  app.post("/v1/servers/:id/backups/prune", async (req) => {
+    const { keep } = (req.body ?? {}) as { keep?: unknown };
+    const n = Number(keep);
+    if (!Number.isInteger(n) || n < 1 || n > 1000) throw new BackupError("keep must be 1 to 1000", 400);
+    return { removed: await servers.backups.prune(parseId(req.params), n) };
+  });
+
+  app.get("/v1/servers/:id/backups/:name/download", async (req, reply) => {
+    const name = bname(req.params);
+    const b = await servers.backups.download(parseId(req.params), name);
+    reply.header("content-type", "application/gzip");
+    reply.header("content-length", String(b.bytes));
+    reply.header("content-disposition", `attachment; filename="${name}"`);
+    return reply.send(b.stream);
+  });
+
+  app.delete("/v1/servers/:id/backups/:name", async (req, reply) => {
+    await servers.backups.remove(parseId(req.params), bname(req.params));
+    return reply.code(204).send();
+  });
 
   app.get("/v1/servers/:id/info", async (req) => servers.info(parseId(req.params)));
 

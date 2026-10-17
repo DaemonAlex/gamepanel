@@ -257,6 +257,19 @@ describe("panel API", () => {
     expect(rows[0]?.detail).toEqual({ diff: { "max-players": { from: "20", to: "30" } }, backup: "/b/x" });
   });
 
+  it("validates schedules and keeps them per server", async () => {
+    const cookie = await login("admin@example.com", "admin-pass");
+    const noText = await app.inject({ method: "POST", url: "/api/servers/pw/schedules", headers: { cookie, ...H }, payload: { action: "command", kind: "interval", minutes: 60 } });
+    expect(noText.statusCode).toBe(400);
+    const badTz = await app.inject({ method: "POST", url: "/api/servers/pw/schedules", headers: { cookie, ...H }, payload: { action: "backup", kind: "daily", tz: "Mars/Base" } });
+    expect(badTz.statusCode).toBe(400);
+    const ok = await app.inject({ method: "POST", url: "/api/servers/pw/schedules", headers: { cookie, ...H }, payload: { action: "restart", kind: "daily", time: "04:00", tz: "America/New_York" } });
+    expect(ok.statusCode).toBe(201);
+    expect(ok.json()).toMatchObject({ action: "restart", time: "04:00", days: [0, 1, 2, 3, 4, 5, 6], enabled: true });
+    const bob = await login("bob@example.com", "bob-pass");
+    expect((await app.inject({ url: "/api/servers/pw/schedules", headers: { cookie: bob } })).statusCode).toBe(404);
+  });
+
   it("logs out", async () => {
     const cookie = await login("admin@example.com", "admin-pass");
     await app.inject({ method: "POST", url: "/api/auth/logout", headers: { cookie, ...H } });

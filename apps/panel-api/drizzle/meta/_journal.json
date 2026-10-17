@@ -15,6 +15,13 @@
       "when": 1792220769106,
       "tag": "0001_metrics",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1792225945083,
+      "tag": "0002_schedules",
+      "breakpoints": true
     }
   ]
 }

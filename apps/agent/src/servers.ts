@@ -7,6 +7,7 @@ import Docker from "dockerode";
 import { checkProperty } from "@gamepanel/shared";
 import type { NodeInfo, PlayerAction, PlayersView, PowerAction, ServerId, ServerInfo, ServerSample, ServerSpec, ServerState, ServerStats, ServerStatus } from "@gamepanel/shared";
 import { readFile } from "node:fs/promises";
+import { Backups, LocalStore } from "./backups.js";
 import { FileError, ServerFiles } from "./files.js";
 import { folderBytes, listJars } from "./info.js";
 import { commandFor, readPlayerFiles } from "./players.js";
@@ -51,10 +52,24 @@ function stateFrom(info: Docker.ContainerInspectInfo): ServerState {
 }
 
 export class Servers {
+  readonly backups: Backups;
+
   constructor(
     private readonly cfg: AgentConfig,
     private readonly docker: Docker = new Docker(),
-  ) {}
+  ) {
+    this.backups = new Backups(new LocalStore(`${cfg.backupRoot}/archives`), {
+      serverDir: (id) => serverDir(cfg, id),
+      dataRoot: cfg.dataRoot,
+      preRestoreRoot: `${cfg.backupRoot}/pre-restore`,
+      isRunning: async (id) => {
+        const s = await this.status(id);
+        return s.state === "running" || s.state === "starting" || s.state === "restarting";
+      },
+      rcon: (id, commands) => this.rconRun(id, commands),
+      uid: MC_UID,
+    });
+  }
 
   // One bridge network for all game containers. Containers on it cannot reach
   // each other (icc off); the node firewall keeps them off private ranges.
