@@ -31,6 +31,13 @@ function fakeAgent(memoryBytes = 16 * GiB) {
     power: vi.fn(async (id: string) => ({ id, state: "running" })),
     command: vi.fn(async () => {}),
     remove: vi.fn(async () => {}),
+    listFiles: vi.fn(async () => [{ name: "server.properties", type: "file", size: 9, modified: "2026-10-17T00:00:00Z" }]),
+    writeFile: vi.fn(async () => {}),
+    async uploadChunk(_id: string, _path: string, _offset: number, _done: boolean, body: NodeJS.ReadableStream) {
+      let size = 0;
+      for await (const c of body) size += (c as Buffer).length;
+      return { size };
+    },
   };
 }
 
@@ -185,6 +192,39 @@ describe("panel API", () => {
     expect((await app.inject({ url: "/api/me", headers: { cookie } })).statusCode).toBe(200);
     expect((await app.inject({ url: "/api/me", headers: { cookie: other } })).statusCode).toBe(401);
     await login("admin@example.com", "a-long-new-password");
+  });
+
+  it("hides another owner's files", async () => {
+    const cookie = await login("bob@example.com", "bob-pass");
+    expect((await app.inject({ url: "/api/servers/pw/files?path=", headers: { cookie } })).statusCode).toBe(404);
+    const w = await app.inject({ method: "PUT", url: "/api/servers/pw/files/content?path=server.properties", headers: { cookie, ...H }, payload: { text: "x" } });
+    expect(w.statusCode).toBe(404);
+    expect(agent.writeFile).not.toHaveBeenCalled();
+  });
+
+  it("lists files and audits a save", async () => {
+    const cookie = await login("admin@example.com", "admin-pass");
+    const list = await app.inject({ url: "/api/servers/pw/files?path=", headers: { cookie } });
+    expect(list.json()[0].name).toBe("server.properties");
+    const w = await app.inject({ method: "PUT", url: "/api/servers/pw/files/content?path=server.properties", headers: { cookie, ...H }, payload: { text: "motd=Hi" } });
+    expect(w.statusCode).toBe(204);
+    expect(agent.writeFile).toHaveBeenCalledWith("pw", "server.properties", "motd=Hi");
+    const rows = await db.select().from(schema.auditLog).where(eq(schema.auditLog.action, "file.write"));
+    expect(rows[0]?.detail).toEqual({ path: "server.properties", bytes: 7 });
+  });
+
+  it("streams an upload piece through and audits the finished file", async () => {
+    const cookie = await login("admin@example.com", "admin-pass");
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/servers/pw/files/upload?path=plugins/x.jar&offset=0&done=1",
+      headers: { cookie, ...H, "content-type": "application/octet-stream" },
+      payload: Buffer.alloc(1000, 7),
+    });
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toEqual({ size: 1000 });
+    const rows = await db.select().from(schema.auditLog).where(eq(schema.auditLog.action, "file.upload"));
+    expect(rows[0]?.detail).toEqual({ path: "plugins/x.jar", bytes: 1000 });
   });
 
   it("logs out", async () => {

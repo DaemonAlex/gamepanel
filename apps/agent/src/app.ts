@@ -4,6 +4,7 @@ import websocket from "@fastify/websocket";
 import { ZodError } from "zod";
 import { consoleInSchema, powerActionSchema, serverIdSchema, serverSpecSchema, type ConsoleOut } from "@gamepanel/shared";
 import { tokenMatches } from "./auth.js";
+import { FileError } from "./files.js";
 import { ImportError } from "./import.js";
 import { ConflictError, type Servers } from "./servers.js";
 
@@ -26,6 +27,7 @@ export async function buildApp(token: string, servers: Servers, opts: FastifySer
   app.setErrorHandler((err, _req, reply) => {
     if (err instanceof ConflictError) return reply.code(409).send({ error: err.message });
     if (err instanceof ImportError) return reply.code(422).send({ error: err.message });
+    if (err instanceof FileError) return reply.code(err.status).send({ error: err.message });
     if (err instanceof ZodError) return reply.code(400).send({ error: "invalid request" });
     app.log.error(err);
     return reply.code(500).send({ error: "agent error" });
@@ -76,6 +78,48 @@ export async function buildApp(token: string, servers: Servers, opts: FastifySer
     await servers.sendCommand(id, cmd);
     return reply.code(204).send();
   });
+
+  // --- files ------------------------------------------------------------------
+  const q = (req: { query: unknown }, name: string) => String((req.query as Record<string, unknown>)[name] ?? "");
+
+  app.get("/v1/servers/:id/files", async (req) => servers.files(parseId(req.params)).list(q(req, "path")));
+
+  app.get("/v1/servers/:id/files/content", async (req) => ({ text: await servers.files(parseId(req.params)).readText(q(req, "path")) }));
+
+  app.put("/v1/servers/:id/files/content", { bodyLimit: 3 * 1024 * 1024 }, async (req, reply) => {
+    const { text } = (req.body ?? {}) as { text?: unknown };
+    if (typeof text !== "string") throw new FileError("text is required");
+    await servers.files(parseId(req.params)).writeText(q(req, "path"), text);
+    return reply.code(204).send();
+  });
+
+  app.get("/v1/servers/:id/files/download", async (req, reply) => {
+    const f = await servers.files(parseId(req.params)).download(q(req, "path"));
+    reply.header("content-type", "application/octet-stream");
+    reply.header("content-length", String(f.size));
+    reply.header("content-disposition", `attachment; filename="${f.name.replace(/[^\w.-]/g, "_")}"`);
+    return reply.send(f.stream);
+  });
+
+  app.post("/v1/servers/:id/files/upload", async (req) => {
+    const offset = Number(q(req, "offset") || "0");
+    if (!Number.isInteger(offset) || offset < 0) throw new FileError("bad offset");
+    return servers.files(parseId(req.params)).uploadChunk(q(req, "path"), offset, q(req, "done") === "1", req.body as Readable);
+  });
+
+  app.post("/v1/servers/:id/files/mkdir", async (req, reply) => {
+    const { path } = (req.body ?? {}) as { path?: unknown };
+    await servers.files(parseId(req.params)).mkdir(String(path ?? ""));
+    return reply.code(204).send();
+  });
+
+  app.post("/v1/servers/:id/files/rename", async (req, reply) => {
+    const { from, to } = (req.body ?? {}) as { from?: unknown; to?: unknown };
+    await servers.files(parseId(req.params)).rename(String(from ?? ""), String(to ?? ""));
+    return reply.code(204).send();
+  });
+
+  app.delete("/v1/servers/:id/files", async (req) => ({ trashedTo: await servers.files(parseId(req.params)).remove(q(req, "path")) }));
 
   app.delete("/v1/servers/:id", async (req, reply) => {
     await servers.removeContainer(parseId(req.params));

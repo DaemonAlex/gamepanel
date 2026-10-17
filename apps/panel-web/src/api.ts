@@ -37,6 +37,46 @@ export const api = {
   broadcast: (message: string) => call<{ results: { id: string; ok: boolean }[] }>("POST", "/api/servers/broadcast", { message }),
 };
 
+export interface FileEntry {
+  name: string;
+  type: "file" | "dir" | "link";
+  size: number;
+  modified: string;
+}
+
+const enc = encodeURIComponent;
+export const files = {
+  list: (id: string, path: string) => call<FileEntry[]>("GET", `/api/servers/${enc(id)}/files?path=${enc(path)}`),
+  read: (id: string, path: string) => call<{ text: string }>("GET", `/api/servers/${enc(id)}/files/content?path=${enc(path)}`),
+  write: (id: string, path: string, text: string) => call<void>("PUT", `/api/servers/${enc(id)}/files/content?path=${enc(path)}`, { text }),
+  mkdir: (id: string, path: string) => call<void>("POST", `/api/servers/${enc(id)}/files/mkdir`, { path }),
+  rename: (id: string, from: string, to: string) => call<void>("POST", `/api/servers/${enc(id)}/files/rename`, { from, to }),
+  remove: (id: string, path: string) => call<{ ok: true }>("DELETE", `/api/servers/${enc(id)}/files?path=${enc(path)}`),
+  downloadUrl: (id: string, path: string) => `/api/servers/${enc(id)}/files/download?path=${enc(path)}`,
+
+  // Upload in 50 MB pieces: Cloudflare refuses single requests over 100 MB.
+  async upload(id: string, path: string, file: File, onProgress: (sent: number) => void): Promise<void> {
+    const PIECE = 50 * 1024 * 1024;
+    let offset = 0;
+    do {
+      const piece = file.slice(offset, offset + PIECE);
+      const done = offset + piece.size >= file.size;
+      const res = await fetch(`/api/servers/${enc(id)}/files/upload?path=${enc(path)}&offset=${offset}&done=${done ? 1 : 0}`, {
+        method: "POST",
+        credentials: "same-origin",
+        headers: { "x-gamepanel": "1", "content-type": "application/octet-stream" },
+        body: piece,
+      });
+      if (!res.ok) {
+        const data = (await res.json().catch(() => ({}))) as { error?: string };
+        throw new ApiError(data.error ?? `upload failed (${res.status})`, res.status);
+      }
+      offset += piece.size;
+      onProgress(offset);
+    } while (offset < file.size);
+  },
+};
+
 export function consoleUrl(id: string): string {
   const proto = location.protocol === "https:" ? "wss:" : "ws:";
   return `${proto}//${location.host}/api/servers/${encodeURIComponent(id)}/console`;

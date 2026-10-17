@@ -6,6 +6,13 @@ import type { NodeInfo, PowerAction, ServerSpec, ServerStats, ServerStatus } fro
 // Talking to one node's agent. TLS trusts only that node's own certificate,
 // and every call carries the node's token.
 
+export interface FileEntry {
+  name: string;
+  type: "file" | "dir" | "link";
+  size: number;
+  modified: string;
+}
+
 export class AgentError extends Error {
   constructor(
     message: string,
@@ -56,6 +63,43 @@ export class AgentClient {
   power = (id: string, action: PowerAction) => this.call<ServerStatus>("POST", `/v1/servers/${id}/power`, { action });
   command = (id: string, cmd: string) => this.call<void>("POST", `/v1/servers/${id}/command`, { cmd });
   remove = (id: string) => this.call<void>("DELETE", `/v1/servers/${id}`);
+
+  // --- files ---
+  private qs(params: Record<string, string | number>): string {
+    return new URLSearchParams(Object.entries(params).map(([k, v]) => [k, String(v)])).toString();
+  }
+  listFiles = (id: string, path: string) => this.call<FileEntry[]>("GET", `/v1/servers/${id}/files?${this.qs({ path })}`);
+  readFile = (id: string, path: string) => this.call<{ text: string }>("GET", `/v1/servers/${id}/files/content?${this.qs({ path })}`);
+  writeFile = (id: string, path: string, text: string) => this.call<void>("PUT", `/v1/servers/${id}/files/content?${this.qs({ path })}`, { text });
+  mkdir = (id: string, path: string) => this.call<void>("POST", `/v1/servers/${id}/files/mkdir`, { path });
+  rename = (id: string, from: string, to: string) => this.call<void>("POST", `/v1/servers/${id}/files/rename`, { from, to });
+  removeFile = (id: string, path: string) => this.call<{ trashedTo: string }>("DELETE", `/v1/servers/${id}/files?${this.qs({ path })}`);
+
+  // Streams pass straight through the panel; nothing is held in memory.
+  async download(id: string, path: string): Promise<{ status: number; headers: Record<string, string | string[] | undefined>; body: Readable }> {
+    const res = await request(`${this.target.url}/v1/servers/${id}/files/download?${this.qs({ path })}`, {
+      method: "GET",
+      dispatcher: this.dispatcher,
+      headers: { authorization: `Bearer ${this.target.token}` },
+    });
+    if (res.statusCode >= 400) {
+      const text = await res.body.text();
+      throw new AgentError((JSON.parse(text || "{}") as { error?: string }).error ?? text, res.statusCode);
+    }
+    return { status: res.statusCode, headers: res.headers, body: res.body };
+  }
+
+  async uploadChunk(id: string, path: string, offset: number, done: boolean, body: Readable): Promise<{ size: number }> {
+    const res = await request(`${this.target.url}/v1/servers/${id}/files/upload?${this.qs({ path, offset, done: done ? 1 : 0 })}`, {
+      method: "POST",
+      dispatcher: this.dispatcher,
+      headers: { authorization: `Bearer ${this.target.token}`, "content-type": "application/octet-stream" },
+      body,
+    });
+    const text = await res.body.text();
+    if (res.statusCode >= 400) throw new AgentError((JSON.parse(text || "{}") as { error?: string }).error ?? text, res.statusCode);
+    return JSON.parse(text) as { size: number };
+  }
 
   async importArchive(id: string, format: "tar.gz" | "zip", body: Readable): Promise<unknown> {
     const res = await request(`${this.target.url}/v1/servers/${id}/import?format=${format}`, {

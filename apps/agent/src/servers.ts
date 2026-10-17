@@ -5,6 +5,7 @@ import { dirname } from "node:path";
 import { PassThrough, type Readable } from "node:stream";
 import Docker from "dockerode";
 import type { NodeInfo, PowerAction, ServerId, ServerSpec, ServerState, ServerStats, ServerStatus } from "@gamepanel/shared";
+import { ServerFiles } from "./files.js";
 import { chownTree, detect, extractArchive, findLayout, fixServerPropertiesFile, type ArchiveFormat, type Detected } from "./import.js";
 import type { AgentConfig } from "./config.js";
 import { buildCreateOptions, containerName, imageFor, LABEL, MC_UID, rconPasswordFile, serverDir, STOP_TIMEOUT_S } from "./containers.js";
@@ -190,6 +191,11 @@ export class Servers {
     } finally {
       await rm(staging, { recursive: true, force: true });
     }
+  }
+
+  // File access for one server's folder. Deletes go to backups/trash/<id>.
+  files(id: ServerId): ServerFiles {
+    return new ServerFiles(serverDir(this.cfg, id), `${this.cfg.backupRoot}/trash/${id}`, MC_UID);
   }
 
   // Every game server container on this node, by label.

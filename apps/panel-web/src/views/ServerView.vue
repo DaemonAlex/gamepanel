@@ -1,8 +1,9 @@
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref } from "vue";
+import { computed, defineAsyncComponent, onMounted, onUnmounted, ref } from "vue";
 import type { PowerAction, ServerView } from "@gamepanel/shared";
 import { api } from "../api.js";
 import ConsolePanel from "../components/ConsolePanel.vue";
+
 import { barClass, copy, gib, pct, stateOf, uptime } from "../format.js";
 
 const props = defineProps<{ id: string }>();
@@ -12,6 +13,18 @@ const busy = ref<PowerAction | null>(null);
 const confirmKill = ref(false);
 const copied = ref(false);
 let timer: ReturnType<typeof setInterval> | undefined;
+
+// The file manager carries the code editor, so it loads only when opened.
+const FilesPanel = defineAsyncComponent(() => import("../components/FilesPanel.vue"));
+
+// Tabs; the choice is kept in the address (#files) so a reload stays put.
+const tabs = ["overview", "console", "files"] as const;
+type Tab = (typeof tabs)[number];
+const tab = ref<Tab>(tabs.includes(location.hash.slice(1) as Tab) ? (location.hash.slice(1) as Tab) : "overview");
+function pick(t: Tab) {
+  tab.value = t;
+  history.replaceState(null, "", `#${t}`);
+}
 
 async function load() {
   try {
@@ -91,7 +104,11 @@ async function copyAddress() {
         <span v-if="busy" class="muted">{{ busy }}...</span>
       </section>
 
-      <section class="stats">
+      <nav class="tabs" role="tablist" aria-label="Server sections">
+        <button v-for="t in tabs" :key="t" type="button" role="tab" :aria-selected="tab === t" :class="{ on: tab === t }" @click="pick(t)">{{ t }}</button>
+      </nav>
+
+      <section v-if="tab === 'overview'" class="stats">
         <div class="panel">
           <p class="label">Players</p>
           <p class="num">{{ server.stats?.players ? `${server.stats.players.online} / ${server.stats.players.max}` : "-" }}</p>
@@ -115,7 +132,8 @@ async function copyAddress() {
         </div>
       </section>
 
-      <ConsolePanel :id="server.id" class="panel" />
+      <ConsolePanel v-if="tab === 'console'" :id="server.id" class="panel" />
+      <FilesPanel v-if="tab === 'files'" :id="server.id" class="panel" />
     </template>
   </main>
 </template>
@@ -132,4 +150,8 @@ async function copyAddress() {
 .stats p { margin: 0; }
 .num { font: 900 26px var(--font); font-variant-numeric: tabular-nums; margin: 4px 0 6px !important; }
 .small { font-size: 13px; }
+.tabs { display: flex; gap: 4px; flex-wrap: wrap; border-bottom: 1px solid var(--line); }
+.tabs button { font: 600 13px var(--mono); letter-spacing: 0.06em; text-transform: uppercase; padding: 8px 14px; background: transparent; color: var(--ink2); border: 1px solid transparent; border-bottom: 0; cursor: pointer; }
+.tabs button.on { background: var(--gold); color: var(--sea); }
+.tabs button:focus-visible { outline: 2px solid var(--gold); outline-offset: 2px; }
 </style>

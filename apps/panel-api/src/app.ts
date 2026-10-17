@@ -17,6 +17,7 @@ import {
   type NodeView,
   type ServerView,
 } from "@gamepanel/shared";
+import type { Readable } from "node:stream";
 import { AgentError } from "./agent/client.js";
 import { hashPassword, newSessionId, sessionHash, verifyPassword } from "./auth/crypto.js";
 import type { PanelConfig } from "./config.js";
@@ -74,7 +75,11 @@ export async function buildApp({ cfg, db, nodes }: AppDeps, opts: { logger?: boo
   app.setErrorHandler((err, _req, reply) => {
     if (err instanceof HttpError) return reply.code(err.status).send({ error: err.message });
     if (err instanceof ZodError) return reply.code(400).send({ error: "invalid request", issues: err.issues.map((i) => i.path.join(".")) });
-    if (err instanceof AgentError) return reply.code(err.status === 409 ? 409 : 502).send({ error: `node: ${err.message}` });
+    if (err instanceof AgentError) {
+      // Pass the node's own answer through when it is about the request; hide node faults.
+      const passthrough = err.status >= 400 && err.status < 500;
+      return reply.code(passthrough ? err.status : 502).send({ error: passthrough ? err.message : `node: ${err.message}` });
+    }
     const status = (err as { statusCode?: number }).statusCode;
     if (status && status < 500) return reply.code(status).send({ error: (err as Error).message });
     app.log.error(err);
@@ -389,6 +394,85 @@ export async function buildApp({ cfg, db, nodes }: AppDeps, opts: { logger?: boo
       void audit(db, { userId: me!.id, action: "console.command", serverId: target.row.id, ip: req.ip, detail: { cmd: parsed.data.cmd } });
     });
     socket.on("close", () => upstream.close());
+  });
+
+  // --- files ---------------------------------------------------------------------
+
+  const qp = (req: FastifyRequest, name: string) => String((req.query as Record<string, unknown>)[name] ?? "");
+  async function fileTarget(req: FastifyRequest) {
+    const me = requireMe(req);
+    // Read the address now: after a streamed body the connection details can be gone.
+    const ip = req.ip;
+    const { row, node } = await serverFor(me, (req.params as { id: string }).id);
+    return { me, ip, id: row.id, client: nodes.client(node) };
+  }
+
+  app.get("/api/servers/:id/files", async (req) => {
+    const t = await fileTarget(req);
+    return t.client.listFiles(t.id, qp(req, "path"));
+  });
+
+  app.get("/api/servers/:id/files/content", async (req) => {
+    const t = await fileTarget(req);
+    return t.client.readFile(t.id, qp(req, "path"));
+  });
+
+  app.put("/api/servers/:id/files/content", { bodyLimit: 3 * 1024 * 1024 }, async (req, reply) => {
+    const t = await fileTarget(req);
+    const { text } = (req.body ?? {}) as { text?: unknown };
+    if (typeof text !== "string") throw new HttpError(400, "text is required");
+    const path = qp(req, "path");
+    await t.client.writeFile(t.id, path, text);
+    await audit(db, { userId: t.me.id, action: "file.write", serverId: t.id, ip: t.ip, detail: { path, bytes: Buffer.byteLength(text) } });
+    return reply.code(204).send();
+  });
+
+  app.get("/api/servers/:id/files/download", async (req, reply) => {
+    const t = await fileTarget(req);
+    const path = qp(req, "path");
+    const res = await t.client.download(t.id, path);
+    for (const h of ["content-type", "content-length", "content-disposition"]) {
+      const v = res.headers[h];
+      if (typeof v === "string") reply.header(h, v);
+    }
+    await audit(db, { userId: t.me.id, action: "file.download", serverId: t.id, ip: t.ip, detail: { path } });
+    return reply.send(res.body);
+  });
+
+  // Raw upload pieces stream through to the node.
+  app.addContentTypeParser("application/octet-stream", (_req, payload, done) => done(null, payload));
+  app.post("/api/servers/:id/files/upload", async (req) => {
+    const t = await fileTarget(req);
+    const path = qp(req, "path");
+    const offset = Number(qp(req, "offset") || "0");
+    const done = qp(req, "done") === "1";
+    const result = await t.client.uploadChunk(t.id, path, offset, done, req.body as Readable);
+    if (done) await audit(db, { userId: t.me.id, action: "file.upload", serverId: t.id, ip: t.ip, detail: { path, bytes: result.size } });
+    return result;
+  });
+
+  app.post("/api/servers/:id/files/mkdir", async (req, reply) => {
+    const t = await fileTarget(req);
+    const { path } = (req.body ?? {}) as { path?: unknown };
+    await t.client.mkdir(t.id, String(path ?? ""));
+    await audit(db, { userId: t.me.id, action: "file.mkdir", serverId: t.id, ip: t.ip, detail: { path } });
+    return reply.code(204).send();
+  });
+
+  app.post("/api/servers/:id/files/rename", async (req, reply) => {
+    const t = await fileTarget(req);
+    const { from, to } = (req.body ?? {}) as { from?: unknown; to?: unknown };
+    await t.client.rename(t.id, String(from ?? ""), String(to ?? ""));
+    await audit(db, { userId: t.me.id, action: "file.rename", serverId: t.id, ip: t.ip, detail: { from, to } });
+    return reply.code(204).send();
+  });
+
+  app.delete("/api/servers/:id/files", async (req) => {
+    const t = await fileTarget(req);
+    const path = qp(req, "path");
+    const result = await t.client.removeFile(t.id, path);
+    await audit(db, { userId: t.me.id, action: "file.delete", serverId: t.id, ip: t.ip, detail: { path, trashedTo: result.trashedTo } });
+    return { ok: true };
   });
 
   // --- nodes (admin) ------------------------------------------------------------
