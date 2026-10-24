@@ -229,6 +229,37 @@ export interface VersionJob {
   startedAt: string;
 }
 
+// Released Minecraft versions for the server's type, newest first, and what to
+// suggest. `listed` is false for types whose versions the panel cannot look up
+// (the page then falls back to typing a version).
+export interface VersionsView {
+  type: string;
+  current: string;
+  listed: boolean;
+  available: string[];
+  // Newest release overall.
+  latest: string | null;
+  // Newest release in the current line (1.21.4 -> 1.21.11) when there is one,
+  // otherwise the newest overall. Null when the server is already there.
+  suggested: string | null;
+}
+
+// Whether an installed plugin has a version for a Minecraft version the server
+// might move to. "unknown" = not listed on Modrinth or Hangar, check by hand.
+export interface PluginReadiness {
+  file: string;
+  name: string;
+  installed: string;
+  status: "ready" | "not-yet" | "unknown";
+  // The version that fits the target, when ready.
+  version?: string;
+  source?: "modrinth" | "hangar";
+}
+
+export const versionCheckSchema = z.object({
+  to: z.string().regex(/^\d+\.\d+(?:\.\d+)?$/),
+});
+
 // --- people and access ---
 
 // What a subuser may be allowed on a server. Owners and admins have all of them.
