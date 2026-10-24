@@ -1,4 +1,4 @@
-import type { AccessView, InviteView, Role, ServerPerm, UserView, CatalogHit, LogFile, LogRead, PluginsView, VersionJob, ServerType, BackupJob, BackupsView, ScheduleInput, ScheduleView, Dashboard, Me, MetricPoint, MetricRange, NewServer, NodeMetricPoint, PlayerAction, PlayersView, PowerAction, ServerInfo, ServerView } from "@gamepanel/shared";
+import type { AccessView, InviteView, Role, ServerPerm, UserView, CatalogHit, LogFile, LogRead, PluginsView, PluginReadiness, VersionJob, VersionsView, ServerType, BackupJob, BackupsView, ScheduleInput, ScheduleView, Dashboard, Me, MetricPoint, MetricRange, NewServer, NodeMetricPoint, PlayerAction, PlayersView, PowerAction, ServerInfo, ServerView } from "@gamepanel/shared";
 
 // Talking to the panel API. Every change carries the x-gamepanel header the API requires.
 
@@ -58,6 +58,8 @@ export const api = {
   logs: (id: string) => call<LogFile[]>("GET", `/api/servers/${encodeURIComponent(id)}/logs`),
   readLog: (id: string, path: string, search: string) =>
     call<LogRead>("GET", `/api/servers/${encodeURIComponent(id)}/logs/read?path=${encodeURIComponent(path)}${search ? `&search=${encodeURIComponent(search)}` : ""}`),
+  versions: (id: string) => call<VersionsView>("GET", `/api/servers/${encodeURIComponent(id)}/versions`),
+  checkPlugins: (id: string, to: string) => call<PluginReadiness[]>("GET", `/api/servers/${encodeURIComponent(id)}/versions/check?to=${encodeURIComponent(to)}`),
   versionJob: (id: string) => call<VersionJob | null>("GET", `/api/servers/${encodeURIComponent(id)}/version-job`),
   changeVersion: (id: string, type: ServerType, version: string) => call<VersionJob>("POST", `/api/servers/${encodeURIComponent(id)}/version`, { type, version }),
   backups: (id: string) => call<BackupsView>("GET", `/api/servers/${encodeURIComponent(id)}/backups`),

@@ -19,8 +19,11 @@ import {
   scheduleSchema,
   installSchema,
   versionChangeSchema,
+  versionCheckSchema,
   type PluginsView,
+  type PluginReadiness,
   type VersionJob,
+  type VersionsView,
   type BackupsView,
   type ScheduleView,
   checkProperty,
@@ -50,6 +53,7 @@ import { schema, type Db } from "./db/index.js";
 import { containerBytesFor, memoryFits, nextFreePort } from "./services/allocation.js";
 import { audit } from "./services/audit.js";
 import { resolve as resolvePlugin, search as searchCatalog, updates as pluginUpdates } from "./services/catalog.js";
+import { pluginReadiness as checkPluginReadiness, versionsView } from "./services/versions.js";
 import { computeWarnings, nodeSeries, serverSeries, sparks, warningInput } from "./services/metrics.js";
 import type { NodeRow, Nodes } from "./services/nodes.js";
 
@@ -793,6 +797,26 @@ export async function buildApp({ cfg, db, nodes }: AppDeps, opts: { logger?: boo
   // because a backup can take minutes; the page polls the job.
 
   const versionJobs = new Map<string, VersionJob>();
+
+  // Released versions for this server's type, and the one to suggest.
+  app.get("/api/servers/:id/versions", async (req): Promise<VersionsView> => {
+    const me = requireMe(req);
+    const { row } = await serverFor(me, (req.params as { id: string }).id, "settings");
+    return versionsView(row.type, row.version).catch((e: Error) => {
+      throw new HttpError(502, e.message);
+    });
+  });
+
+  // Whether each installed plugin has a version for the Minecraft version picked.
+  app.get("/api/servers/:id/versions/check", async (req): Promise<PluginReadiness[]> => {
+    const me = requireMe(req);
+    const { row, node } = await serverFor(me, (req.params as { id: string }).id, "settings");
+    const { to } = versionCheckSchema.parse(req.query);
+    const folder = folderFor(row.type);
+    if (!folder) return [];
+    const items = await nodes.client(node).plugins(row.id, folder);
+    return checkPluginReadiness(items, row.type, to);
+  });
 
   app.get("/api/servers/:id/version-job", async (req) => {
     const me = requireMe(req);
