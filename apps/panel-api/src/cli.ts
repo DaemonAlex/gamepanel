@@ -8,6 +8,7 @@ import { serverIdSchema, serverTypeSchema } from "@gamepanel/shared";
 import { hashPassword, newSessionId, seal, sessionHash } from "./auth/crypto.js";
 import { loadConfig } from "./config.js";
 import { schema } from "./db/index.js";
+import { Nodes } from "./services/nodes.js";
 
 // Admin jobs run on the panel VM:
 //   create-admin --email you@example.com          prints a one-time password
@@ -16,6 +17,8 @@ import { schema } from "./db/index.js";
 //     (for a server that already runs on a node; EULA is recorded as accepted by the owner now)
 //   invite --email friend@example.com --role subuser|owner|admin [--give-server pw]
 //     prints a one-time join link path (7 days); --give-server makes them that server's owner when they join
+//   rebuild --id pw [--start]
+//     backs up a stopped server, then recreates its container from its saved settings
 
 const cfg = loadConfig();
 const sql = postgres(cfg.databaseUrl, { max: 1 });
@@ -104,8 +107,36 @@ try {
     const give = values["give-server"] ? serverIdSchema.parse(values["give-server"]) : null;
     await db.insert(schema.invites).values({ tokenHash: sessionHash(token), kind: "invite", email, role, userId: null, giveServerId: give, createdBy: "cli", expiresAt: new Date(Date.now() + 7 * 86_400_000) });
     console.log(`invite for ${email} (${role}): /invite/${token}`);
+  } else if (command === "rebuild") {
+    // Recreate a stopped server's container from its saved settings, so new
+    // defaults (Java flags and the like) take effect. Backup first, always;
+    // the server's folder is untouched.
+    const { values } = parseArgs({ args: rest, options: { id: { type: "string" }, start: { type: "boolean" } } });
+    const id = serverIdSchema.parse(need(values.id, "id"));
+    const [row] = await db.select().from(schema.servers).where(eq(schema.servers.id, id));
+    if (!row) throw new Error("server not found");
+    const node = await new Nodes(db, cfg.appSecret).get(row.nodeId);
+    if (!node) throw new Error("server's node is missing");
+    const client = new Nodes(db, cfg.appSecret).client(node);
+    const status = await client.status(id);
+    if (status.state !== "stopped" && status.state !== "created") throw new Error(`stop the server first (it is ${status.state})`);
+    const job = await client.startBackup(id, "manual", row.backupKeep + 1);
+    process.stdout.write("backing up");
+    for (;;) {
+      await new Promise((r) => setTimeout(r, 3000));
+      const j = (await client.backups(id)).jobs.find((x) => x.id === job.id);
+      if (!j || j.state === "failed") throw new Error(`backup failed${j?.error ? `: ${j.error}` : ""}; nothing was changed`);
+      if (j.state === "done") {
+        console.log(` done: ${j.backup}`);
+        break;
+      }
+      process.stdout.write(".");
+    }
+    await client.apply({ id, type: serverTypeSchema.parse(row.type), version: row.version, memoryMb: row.memoryMb, cpus: row.cpus, diskGb: row.diskGb, port: row.port, eulaAccepted: true });
+    console.log(`${id} rebuilt`);
+    if (values.start) console.log(`${id}: ${(await client.power(id, "start")).state}`);
   } else {
-    console.log("commands: create-admin, add-node, register-server, invite");
+    console.log("commands: create-admin, add-node, register-server, invite, rebuild");
     process.exitCode = 2;
   }
 } catch (err) {
