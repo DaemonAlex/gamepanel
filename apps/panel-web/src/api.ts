@@ -1,4 +1,4 @@
-import type { AccessView, InviteView, Role, ServerPerm, UserView, CatalogHit, LogFile, LogRead, PluginsView, PluginReadiness, VersionJob, VersionsView, ServerType, BackupJob, BackupsView, ScheduleInput, ScheduleView, Dashboard, Me, MetricPoint, MetricRange, NewServer, NodeMetricPoint, PlayerAction, PlayersView, PowerAction, ServerInfo, ServerView } from "@gamepanel/shared";
+import type { AccessView, InviteView, Role, ServerPerm, UserView, CatalogHit, LogFile, LogRead, PluginsView, PluginReadiness, VersionJob, VersionsView, DatabaseInfo, DatabasesView, QueryResult, TableInfo, TableRows, ServerType, BackupJob, BackupsView, ScheduleInput, ScheduleView, Dashboard, Me, MetricPoint, MetricRange, NewServer, NodeMetricPoint, PlayerAction, PlayersView, PowerAction, ServerInfo, ServerView } from "@gamepanel/shared";
 
 // Talking to the panel API. Every change carries the x-gamepanel header the API requires.
 
@@ -58,6 +58,19 @@ export const api = {
   logs: (id: string) => call<LogFile[]>("GET", `/api/servers/${encodeURIComponent(id)}/logs`),
   readLog: (id: string, path: string, search: string) =>
     call<LogRead>("GET", `/api/servers/${encodeURIComponent(id)}/logs/read?path=${encodeURIComponent(path)}${search ? `&search=${encodeURIComponent(search)}` : ""}`),
+  databases: (id: string) => call<DatabasesView>("GET", `/api/servers/${enc(id)}/databases`),
+  createDatabase: (id: string, label: string) => call<DatabaseInfo & { password: string }>("POST", `/api/servers/${enc(id)}/databases`, { label }),
+  databasePassword: (id: string, db: string) => call<{ password: string }>("GET", `/api/servers/${enc(id)}/databases/${enc(db)}/password`),
+  resetDatabasePassword: (id: string, db: string) => call<{ password: string }>("POST", `/api/servers/${enc(id)}/databases/${enc(db)}/password`, {}),
+  deleteDatabase: (id: string, db: string) => call<{ snapshot: string }>("DELETE", `/api/servers/${enc(id)}/databases/${enc(db)}`),
+  databaseTables: (id: string, db: string) => call<TableInfo[]>("GET", `/api/servers/${enc(id)}/databases/${enc(db)}/tables`),
+  databaseRows: (id: string, db: string, table: string, page: number, pageSize = 50) =>
+    call<TableRows>("GET", `/api/servers/${enc(id)}/databases/${enc(db)}/rows?table=${enc(table)}&page=${page}&pageSize=${pageSize}`),
+  databaseQuery: (id: string, db: string, sql: string, write: boolean) => call<QueryResult>("POST", `/api/servers/${enc(id)}/databases/${enc(db)}/query`, { sql, write }),
+  updateDatabaseRow: (id: string, db: string, table: string, key: Record<string, string | null>, set: Record<string, string | null>) =>
+    call<QueryResult>("POST", `/api/servers/${enc(id)}/databases/${enc(db)}/rows/update`, { table, key, set }),
+  deleteDatabaseRow: (id: string, db: string, table: string, key: Record<string, string | null>) =>
+    call<QueryResult>("POST", `/api/servers/${enc(id)}/databases/${enc(db)}/rows/delete`, { table, key }),
   versions: (id: string) => call<VersionsView>("GET", `/api/servers/${encodeURIComponent(id)}/versions`),
   checkPlugins: (id: string, to: string) => call<PluginReadiness[]>("GET", `/api/servers/${encodeURIComponent(id)}/versions/check?to=${encodeURIComponent(to)}`),
   versionJob: (id: string) => call<VersionJob | null>("GET", `/api/servers/${encodeURIComponent(id)}/version-job`),
