@@ -2,6 +2,7 @@
 import { computed, ref } from "vue";
 import { useRouter } from "vue-router";
 import type { ServerType } from "@gamepanel/shared";
+import { ArrowLeft, Rocket } from "lucide-vue-next";
 import { api } from "../api.js";
 
 const types: { value: ServerType; label: string; note: string }[] = [
@@ -18,6 +19,7 @@ const type = ref<ServerType>("PAPER");
 const version = ref("LATEST");
 const memoryGb = ref(4);
 const cpus = ref(2);
+const diskGb = ref(20);
 const eula = ref(false);
 const error = ref("");
 const busy = ref(false);
@@ -42,6 +44,7 @@ async function create() {
       version: version.value.trim().toUpperCase() === "LATEST" ? "LATEST" : version.value.trim(),
       memoryMb: Math.round(memoryGb.value * 1024),
       cpus: cpus.value,
+      diskGb: diskGb.value,
       eulaAccepted: true,
     });
     await router.push(`/servers/${s.id}`);
@@ -56,7 +59,7 @@ async function create() {
 <template>
   <main class="wrap">
     <div>
-      <RouterLink to="/" class="label">&larr; All servers</RouterLink>
+      <RouterLink to="/" class="label"><ArrowLeft />All servers</RouterLink>
       <h1>New server</h1>
       <p class="muted">It gets the next free port and starts right away. First start downloads the game, so give it a minute.</p>
     </div>
@@ -101,6 +104,9 @@ async function create() {
         <option :value="4">4</option>
       </select>
 
+      <label for="disk" class="label">Disk: {{ diskGb }} GB</label>
+      <input id="disk" v-model.number="diskGb" type="range" min="5" max="200" step="5" />
+
       <label class="eula">
         <input v-model="eula" type="checkbox" />
         <span>I accept the <a href="https://aka.ms/MinecraftEULA" target="_blank" rel="noopener">Minecraft EULA</a> for this server.</span>
@@ -108,7 +114,7 @@ async function create() {
 
       <p v-if="error" class="error" role="alert">{{ error }}</p>
       <div class="row">
-        <button class="btn gold" type="submit" :disabled="busy || !name.trim() || !eula">{{ busy ? "Placing waypoint" : "Create and start" }}</button>
+        <button class="btn gold" type="submit" :disabled="busy || !name.trim() || !eula"><Rocket /> {{ busy ? "Placing waypoint" : "Create and start" }}</button>
         <RouterLink to="/" class="btn">Cancel</RouterLink>
       </div>
     </form>

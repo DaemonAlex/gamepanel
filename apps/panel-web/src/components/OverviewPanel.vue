@@ -3,6 +3,7 @@ import { computed, onMounted, onUnmounted, ref } from "vue";
 import type { ServerInfo, ServerView } from "@gamepanel/shared";
 import { api } from "../api.js";
 import { copy, gib, uptime } from "../format.js";
+import { Activity, Check, Clock, Copy, Cpu, Globe, Link, MemoryStick, Puzzle, Send, Server, Timer, TriangleAlert, Users } from "lucide-vue-next";
 import GraphsPanel from "./GraphsPanel.vue";
 
 const props = defineProps<{ server: ServerView }>();
@@ -63,10 +64,10 @@ const yesNo = (v: string | undefined) => (v === "true" ? "on" : v === "false" ? 
     <p v-if="error" class="error" role="alert">{{ error }}</p>
 
     <article class="panel conn">
-      <p class="label">Connection info</p>
+      <p class="label"><Link />Connection info</p>
       <div class="addr-row">
         <span class="mono addr">{{ server.address }}</span>
-        <button class="btn gold" type="button" @click="doCopy('address')">{{ copied === "address" ? "Copied" : "Copy address" }}</button>
+        <button class="btn gold" type="button" @click="doCopy('address')"><Check v-if="copied === 'address'" /><Copy v-else /> {{ copied === "address" ? "Copied" : "Copy address" }}</button>
       </div>
       <dl class="facts">
         <div><dt class="label">Edition</dt><dd>Java</dd></div>
@@ -75,43 +76,41 @@ const yesNo = (v: string | undefined) => (v === "true" ? "on" : v === "false" ? 
         <div><dt class="label">IP and port</dt><dd class="mono">{{ server.publicIp }}:{{ server.port }}</dd></div>
       </dl>
       <details>
-        <summary class="label">Join steps to send a friend</summary>
+        <summary class="label"><Send />Join steps to send a friend</summary>
         <pre class="share mono">{{ shareText }}</pre>
-        <button class="btn" type="button" @click="doCopy('share')">{{ copied === "share" ? "Copied" : "Copy join steps" }}</button>
+        <button class="btn" type="button" @click="doCopy('share')"><Check v-if="copied === 'share'" /><Copy v-else /> {{ copied === "share" ? "Copied" : "Copy join steps" }}</button>
       </details>
     </article>
 
     <div class="tiles">
       <div class="panel tile">
-        <p class="label">TPS 1m / 5m / 15m</p>
-        <p v-if="info?.live?.tps" class="num">
-          <span v-for="(t, i) in info.live.tps" :key="i" :class="tpsClass(t)">{{ t.toFixed(1) }}<span v-if="i < 2" class="muted"> / </span></span>
-        </p>
+        <p class="label"><Activity />TPS</p>
+        <p v-if="info?.live?.tps" class="num" :class="tpsClass(info.live.tps[0])">{{ info.live.tps[0].toFixed(1) }}</p>
         <p v-else class="num muted">-</p>
-        <p class="muted small">20 is perfect</p>
+        <p class="muted small">{{ info?.live?.tps ? `5 min ${info.live.tps[1].toFixed(1)} · 15 min ${info.live.tps[2].toFixed(1)}` : "20 is perfect" }}</p>
       </div>
       <div class="panel tile">
-        <p class="label">Tick time</p>
+        <p class="label"><Timer />Tick time</p>
         <p class="num" :class="info?.live?.msptAvg != null && info.live.msptAvg > 50 ? 'bad' : ''">{{ info?.live?.msptAvg != null ? `${info.live.msptAvg} ms` : "-" }}</p>
         <p class="muted small">under 50 ms keeps 20 TPS</p>
       </div>
       <div class="panel tile">
-        <p class="label">Players</p>
+        <p class="label"><Users />Players</p>
         <p class="num">{{ info?.live ? `${info.live.online} / ${info.live.max}` : server.stats?.players ? `${server.stats.players.online} / ${server.stats.players.max}` : "-" }}</p>
         <p class="muted small">{{ p["online-mode"] === "true" ? "real accounts only" : "offline mode" }}</p>
       </div>
       <div class="panel tile">
-        <p class="label">Up time</p>
+        <p class="label"><Clock />Up time</p>
         <p class="num">{{ up ? uptime(server.status?.startedAt) : "stopped" }}</p>
         <p class="muted small">{{ info?.restartCount ?? 0 }} automatic restarts</p>
       </div>
       <div class="panel tile">
-        <p class="label">CPU</p>
+        <p class="label"><Cpu />CPU</p>
         <p class="num">{{ server.stats ? `${server.stats.cpuPercent}%` : "-" }}</p>
         <p class="muted small">{{ server.cpus }} cores allowed</p>
       </div>
       <div class="panel tile">
-        <p class="label">RAM</p>
+        <p class="label"><MemoryStick />RAM</p>
         <p class="num">{{ server.stats ? gib(server.stats.memoryBytes) : "-" }}</p>
         <p class="muted small">of {{ server.stats ? gib(server.stats.memoryLimitBytes) : `${server.memoryMb} MB heap` }}</p>
       </div>
@@ -120,11 +119,12 @@ const yesNo = (v: string | undefined) => (v === "true" ? "on" : v === "false" ? 
     <GraphsPanel :id="server.id" />
 
     <p v-if="crashed" class="panel bad-box">
+      <TriangleAlert />
       Last stop was not clean ({{ crashed.oomKilled ? "ran out of memory" : `exit code ${crashed.code}` }}) on {{ when(crashed.at) }}.
     </p>
 
     <article class="panel">
-      <p class="label">Online now</p>
+      <p class="label"><Users />Online now</p>
       <div v-if="info?.live?.players.length" class="players">
         <div v-for="pl in info.live.players" :key="pl.name" class="player">
           <img :src="head(pl)" :alt="`${pl.name}'s skin`" width="40" height="40" loading="lazy" />
@@ -136,7 +136,7 @@ const yesNo = (v: string | undefined) => (v === "true" ? "on" : v === "false" ? 
 
     <div class="cols">
       <article class="panel">
-        <p class="label">Server</p>
+        <p class="label"><Server />Server</p>
         <dl class="list">
           <div><dt>Type</dt><dd>{{ server.type }}</dd></div>
           <div><dt>Build</dt><dd class="mono">{{ info?.build ?? server.version }}</dd></div>
@@ -152,7 +152,7 @@ const yesNo = (v: string | undefined) => (v === "true" ? "on" : v === "false" ? 
       </article>
 
       <article class="panel">
-        <p class="label">Worlds &middot; {{ info ? gib(info.diskBytes) : "-" }} on disk in total</p>
+        <p class="label"><Globe />Worlds &middot; {{ info ? gib(info.diskBytes) : "-" }} on disk in total</p>
         <dl class="list">
           <div v-for="w in info?.worlds ?? []" :key="w.name"><dt class="mono">{{ w.name }}</dt><dd>{{ gib(w.bytes) }}</dd></div>
         </dl>
@@ -161,7 +161,7 @@ const yesNo = (v: string | undefined) => (v === "true" ? "on" : v === "false" ? 
     </div>
 
     <article v-if="info && (info.plugins.length || info.mods.length)" class="panel">
-      <p class="label">{{ info.plugins.length ? `Plugins (${info.plugins.length})` : "" }} {{ info.mods.length ? `Mods (${info.mods.length})` : "" }}</p>
+      <p class="label"><Puzzle />{{ info.plugins.length ? `Plugins (${info.plugins.length})` : "" }} {{ info.mods.length ? `Mods (${info.mods.length})` : "" }}</p>
       <div class="chips">
         <span v-for="x in [...info.plugins, ...info.mods]" :key="x.file" class="chip">{{ x.name }} <span class="muted mono">{{ x.version }}</span></span>
       </div>
@@ -185,7 +185,7 @@ details summary { cursor: pointer; }
 .ok { color: var(--ok); }
 .warn { color: var(--warn); }
 .bad { color: var(--bad); }
-.bad-box { border-color: var(--bad); color: var(--bad); margin: 0; }
+.bad-box { border-color: var(--bad); color: var(--bad); margin: 0; display: flex; gap: 10px; align-items: center; }
 .players { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 8px; }
 .player { display: flex; align-items: center; gap: 8px; background: var(--abyss); padding: 6px 10px 6px 6px; border: 1px solid var(--line-soft); }
 .player img { image-rendering: pixelated; }

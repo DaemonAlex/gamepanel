@@ -2,9 +2,28 @@ import type { Readable } from "node:stream";
 import Fastify, { type FastifyInstance, type FastifyServerOptions } from "fastify";
 import websocket from "@fastify/websocket";
 import { ZodError } from "zod";
-import { consoleInSchema, playerActionSchema, powerActionSchema, serverIdSchema, serverSpecSchema, whitelistToggleSchema, type ConsoleOut } from "@gamepanel/shared";
+import {
+  backupNameSchema,
+  consoleInSchema,
+  dbCreateSchema,
+  dbNameSchema,
+  dbQuerySchema,
+  dbRowEditSchema,
+  dbRowsQuerySchema,
+  playerActionSchema,
+  propertyChangesSchema,
+  powerActionSchema,
+  serverIdSchema,
+  serverSpecSchema,
+  whitelistToggleSchema,
+  type ConsoleOut,
+} from "@gamepanel/shared";
 import { tokenMatches } from "./auth.js";
+import { BackupError } from "./backups.js";
+import { DbError } from "./db-sql.js";
 import { FileError } from "./files.js";
+import { listLogs, readLog } from "./logs.js";
+import { installFromUrl, listPlugins, setEnabled } from "./plugins.js";
 import { ImportError } from "./import.js";
 import { ConflictError, type Servers } from "./servers.js";
 
@@ -28,6 +47,8 @@ export async function buildApp(token: string, servers: Servers, opts: FastifySer
     if (err instanceof ConflictError) return reply.code(409).send({ error: err.message });
     if (err instanceof ImportError) return reply.code(422).send({ error: err.message });
     if (err instanceof FileError) return reply.code(err.status).send({ error: err.message });
+    if (err instanceof BackupError) return reply.code(err.status).send({ error: err.message });
+    if (err instanceof DbError) return reply.code(err.status).send({ error: err.message });
     if (err instanceof ZodError) return reply.code(400).send({ error: "invalid request" });
     app.log.error(err);
     return reply.code(500).send({ error: "agent error" });
@@ -55,6 +76,149 @@ export async function buildApp(token: string, servers: Servers, opts: FastifySer
   app.post("/v1/servers/:id/players/whitelist", async (req) => ({
     answer: await servers.setWhitelist(parseId(req.params), whitelistToggleSchema.parse(req.body).on),
   }));
+
+  app.get("/v1/servers/:id/properties", async (req) => ({ values: await servers.properties(parseId(req.params)) }));
+
+  app.put("/v1/servers/:id/properties", async (req) => servers.setProperties(parseId(req.params), propertyChangesSchema.parse(req.body).changes));
+
+  // --- plugins and mods ------------------------------------------------------
+  const folderOf = (req: { query: unknown }) => {
+    const f = (req.query as { folder?: string }).folder;
+    if (f !== "plugins" && f !== "mods") throw new FileError("folder must be plugins or mods");
+    return f;
+  };
+
+  app.get("/v1/servers/:id/plugins", async (req) => listPlugins(servers.files(parseId(req.params)), folderOf(req)));
+
+  app.post("/v1/servers/:id/plugins/enabled", async (req) => {
+    const { file, on } = (req.body ?? {}) as { file?: unknown; on?: unknown };
+    return { file: await setEnabled(servers.files(parseId(req.params)), folderOf(req), String(file ?? ""), on === true) };
+  });
+
+  app.post("/v1/servers/:id/plugins/install", async (req) => {
+    const b = (req.body ?? {}) as { url?: unknown; filename?: unknown; sha512?: unknown; sha256?: unknown; sha1?: unknown };
+    const str = (v: unknown) => (typeof v === "string" ? v : undefined);
+    return installFromUrl(servers.files(parseId(req.params)), folderOf(req), {
+      url: String(b.url ?? ""),
+      filename: String(b.filename ?? ""),
+      ...(str(b.sha512) ? { sha512: str(b.sha512)! } : {}),
+      ...(str(b.sha256) ? { sha256: str(b.sha256)! } : {}),
+      ...(str(b.sha1) ? { sha1: str(b.sha1)! } : {}),
+    });
+  });
+
+  // --- databases ---------------------------------------------------------------
+  const dbOf = (params: unknown) => ({ id: parseId(params), db: dbNameSchema.parse((params as { db?: unknown }).db) });
+
+  app.get("/v1/servers/:id/databases", async (req) => servers.databases.list(parseId(req.params)));
+
+  app.post("/v1/servers/:id/databases", async (req) => servers.databases.create(parseId(req.params), dbCreateSchema.parse(req.body).label));
+
+  app.get("/v1/servers/:id/databases/:db/password", async (req) => {
+    const { id, db } = dbOf(req.params);
+    return servers.databases.password(id, db);
+  });
+
+  app.post("/v1/servers/:id/databases/:db/password", async (req) => {
+    const { id, db } = dbOf(req.params);
+    return servers.databases.resetPassword(id, db);
+  });
+
+  app.delete("/v1/servers/:id/databases/:db", async (req) => {
+    const { id, db } = dbOf(req.params);
+    return servers.databases.remove(id, db);
+  });
+
+  app.get("/v1/servers/:id/databases/:db/tables", async (req) => {
+    const { id, db } = dbOf(req.params);
+    return servers.databases.tables(id, db);
+  });
+
+  app.get("/v1/servers/:id/databases/:db/rows", async (req) => {
+    const { id, db } = dbOf(req.params);
+    const q = dbRowsQuerySchema.parse(req.query);
+    return servers.databases.rows(id, db, q.table, q.page, q.pageSize);
+  });
+
+  app.post("/v1/servers/:id/databases/:db/query", async (req) => {
+    const { id, db } = dbOf(req.params);
+    const q = dbQuerySchema.parse(req.body);
+    return servers.databases.query(id, db, q.sql, q.write);
+  });
+
+  app.post("/v1/servers/:id/databases/:db/rows/update", { bodyLimit: 1024 * 1024 }, async (req) => {
+    const { id, db } = dbOf(req.params);
+    const e = dbRowEditSchema.parse(req.body);
+    return servers.databases.updateRow(id, db, e.table, e.key, e.set ?? {});
+  });
+
+  app.post("/v1/servers/:id/databases/:db/rows/delete", { bodyLimit: 1024 * 1024 }, async (req) => {
+    const { id, db } = dbOf(req.params);
+    const e = dbRowEditSchema.parse(req.body);
+    return servers.databases.deleteRow(id, db, e.table, e.key);
+  });
+
+  // --- logs --------------------------------------------------------------------
+  app.get("/v1/servers/:id/logs", async (req) => listLogs(servers.files(parseId(req.params))));
+
+  app.get("/v1/servers/:id/logs/read", async (req) => {
+    const qy = req.query as { path?: string; search?: string; tail?: string };
+    return readLog(servers.files(parseId(req.params)), String(qy.path ?? ""), {
+      ...(qy.search ? { search: qy.search.slice(0, 200) } : {}),
+      ...(qy.tail ? { tail: Number(qy.tail) } : {}),
+    });
+  });
+
+  // --- backups ---------------------------------------------------------------
+  const bname = (params: unknown) => backupNameSchema.parse((params as { name?: unknown }).name);
+
+  app.get("/v1/servers/:id/backups", async (req) => {
+    const id = parseId(req.params);
+    return { backups: await servers.backups.list(id), jobs: servers.backups.jobsFor(id) };
+  });
+
+  app.post("/v1/servers/:id/backups", async (req) => {
+    const { reason, keep } = (req.body ?? {}) as { reason?: unknown; keep?: unknown };
+    const k = keep === undefined ? undefined : Number(keep);
+    if (k !== undefined && (!Number.isInteger(k) || k < 1 || k > 1000)) throw new BackupError("keep must be 1 to 1000", 400);
+    return servers.backups.start(parseId(req.params), reason === "schedule" ? "schedule" : "manual", k);
+  });
+
+  app.post("/v1/servers/:id/backups/restore", async (req) => {
+    const { name } = (req.body ?? {}) as { name?: unknown };
+    return servers.backups.restore(parseId(req.params), backupNameSchema.parse(name));
+  });
+
+  app.post("/v1/servers/:id/backups/prune", async (req) => {
+    const { keep } = (req.body ?? {}) as { keep?: unknown };
+    const n = Number(keep);
+    if (!Number.isInteger(n) || n < 1 || n > 1000) throw new BackupError("keep must be 1 to 1000", 400);
+    return { removed: await servers.backups.prune(parseId(req.params), n) };
+  });
+
+  app.get("/v1/servers/:id/backups/:name/download", async (req, reply) => {
+    const name = bname(req.params);
+    const b = await servers.backups.download(parseId(req.params), name);
+    reply.header("content-type", "application/gzip");
+    reply.header("content-length", String(b.bytes));
+    reply.header("content-disposition", `attachment; filename="${name}"`);
+    return reply.send(b.stream);
+  });
+
+  app.delete("/v1/servers/:id/backups/:name", async (req, reply) => {
+    await servers.backups.remove(parseId(req.params), bname(req.params));
+    return reply.code(204).send();
+  });
+
+  // Disk cap for a server folder (XFS project quota), and current use against it.
+  app.put("/v1/servers/:id/disk", async (req) => {
+    const id = parseId(req.params);
+    const gb = Number((req.body as { gb?: unknown } | undefined)?.gb);
+    if (!Number.isInteger(gb) || gb < 1 || gb > 10000) throw new FileError("gb must be 1 to 10000");
+    return servers.setDisk(id, gb);
+  });
+
+  app.get("/v1/servers/:id/disk", async (req) => servers.quotas.usage(parseId(req.params)));
 
   app.get("/v1/servers/:id/info", async (req) => servers.info(parseId(req.params)));
 

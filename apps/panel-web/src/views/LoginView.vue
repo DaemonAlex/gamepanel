@@ -1,12 +1,15 @@
 <script setup lang="ts">
 import { ref } from "vue";
 import { useRoute, useRouter } from "vue-router";
+import type { ApiError } from "../api.js";
 import { session } from "../session.js";
 
 const email = ref("");
 const password = ref("");
 const error = ref("");
 const busy = ref(false);
+const code = ref("");
+const needCode = ref(false);
 const route = useRoute();
 const router = useRouter();
 
@@ -14,10 +17,11 @@ async function submit() {
   busy.value = true;
   error.value = "";
   try {
-    await session.login(email.value.trim(), password.value);
+    await session.login(email.value.trim(), password.value, needCode.value ? code.value.trim() : undefined);
     const next = typeof route.query.next === "string" && route.query.next.startsWith("/") ? route.query.next : "/";
     await router.push(next);
   } catch (e) {
+    if ((e as ApiError).data?.needCode) needCode.value = true;
     error.value = (e as Error).message;
   } finally {
     busy.value = false;
@@ -34,6 +38,10 @@ async function submit() {
       <input id="email" v-model="email" type="email" autocomplete="username" required />
       <label for="password" class="label">Password</label>
       <input id="password" v-model="password" type="password" autocomplete="current-password" required />
+      <template v-if="needCode">
+        <label for="code" class="label">Code from your authenticator app</label>
+        <input id="code" v-model="code" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]{6}" maxlength="6" required />
+      </template>
       <p v-if="error" class="error" role="alert">{{ error }}</p>
       <button class="btn gold" type="submit" :disabled="busy">{{ busy ? "Logging in" : "Log in" }}</button>
     </form>

@@ -88,13 +88,20 @@ const timeLabel = (t: number) => {
       <span class="val">{{ shownPoint && shownPoint.v !== null ? format(shownPoint.v) : "-" }}</span>
       <span v-if="hover !== null && shownPoint" class="muted when">{{ new Date(shownPoint.t).toLocaleString(undefined, { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" }) }}</span>
     </figcaption>
-    <svg v-if="values.length" :viewBox="`0 0 ${W} ${H}`" preserveAspectRatio="none" role="img" :aria-label="`${title} over time`" @mousemove="onMove" @mouseleave="hover = null">
+    <div v-if="values.length" class="plot">
+    <svg :viewBox="`0 0 ${W} ${H}`" preserveAspectRatio="none" role="img" :aria-label="`${title} over time`" @mousemove="onMove" @mouseleave="hover = null">
       <line v-for="f in [0.25, 0.5, 0.75]" :key="f" :x1="0" :x2="W" :y1="PAD.t + f * (H - PAD.t - PAD.b)" :y2="PAD.t + f * (H - PAD.t - PAD.b)" class="grid" />
       <line v-if="limit" :x1="0" :x2="W" :y1="y(limit)" :y2="y(limit)" class="limit" />
       <path v-for="(a, i) in areas" :key="`a${i}`" :d="a" :fill="color" class="area" />
       <polyline v-for="(s, i) in segments" :key="`l${i}`" :points="s.join(' ')" fill="none" :stroke="color" stroke-width="2" vector-effect="non-scaling-stroke" />
-      <circle v-if="shown >= 0 && shownPoint && shownPoint.v !== null" :cx="x(times[shown]!)" :cy="y(shownPoint.v)" r="3.5" :fill="color" class="dot" />
     </svg>
+    <span
+      v-if="values.length && shown >= 0 && shownPoint && shownPoint.v !== null"
+      class="dot"
+      :style="{ left: `${(x(times[shown]!) / W) * 100}%`, top: `${(y(shownPoint.v) / H) * 100}%`, background: color }"
+      aria-hidden="true"
+    ></span>
+    </div>
     <p v-else class="empty muted">No data yet. Samples start when the server runs.</p>
     <div v-if="values.length" class="axis muted"><span>{{ timeLabel(t0) }}</span><span>{{ timeLabel(t1) }}</span></div>
   </figure>
@@ -109,7 +116,8 @@ svg { width: 100%; height: 110px; display: block; cursor: crosshair; }
 .grid { stroke: var(--line-soft); stroke-width: 1; vector-effect: non-scaling-stroke; }
 .limit { stroke: var(--bad); stroke-width: 1; stroke-dasharray: 4 3; vector-effect: non-scaling-stroke; }
 .area { opacity: 0.14; }
-.dot { stroke: var(--deep); stroke-width: 2; }
+.plot { position: relative; }
+.dot { position: absolute; width: 9px; height: 9px; border-radius: 50%; transform: translate(-50%, -50%); box-shadow: 0 0 0 2px var(--deep); pointer-events: none; }
 .axis { display: flex; justify-content: space-between; font: 11px var(--mono); }
 .empty { height: 110px; display: grid; place-items: center; margin: 0; font-size: 13px; text-align: center; }
 </style>

@@ -59,6 +59,14 @@ input, select {
   width: 100%;
 }
 
+/* Icons (Lucide) take the text colour and sit on the text line. */
+.lucide { width: 16px; height: 16px; flex: none; stroke-width: 2; }
+.label .lucide { width: 13px; height: 13px; vertical-align: -2px; margin-right: 5px; }
+.btn .lucide { width: 16px; height: 16px; }
+.ic-gold { color: var(--gold); }
+.ic-ok { color: var(--ok); }
+.ic-bad { color: var(--bad); }
+
 .panel { background: var(--deep); border: 1px solid var(--line); padding: 16px; }
 .row { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
 .error { color: var(--bad); font-weight: 700; }

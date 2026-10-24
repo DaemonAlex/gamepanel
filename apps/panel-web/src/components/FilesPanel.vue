@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from "vue";
 import { files, type FileEntry } from "../api.js";
+import { Download, File, FileText, FilePlus, Folder, FolderPlus, Link as LinkIcon, Pencil, RefreshCw, Save, Trash2, Upload, X } from "lucide-vue-next";
 import CodeEditor from "./CodeEditor.vue";
 
 const props = defineProps<{ id: string }>();
@@ -171,9 +172,9 @@ async function onUpload(ev: Event) {
       <div class="row bar">
         <span class="mono crumb">{{ editing }}</span>
         <span v-if="dirty" class="label gold">Not saved</span>
-        <button class="btn gold" type="button" :disabled="!dirty || saving" @click="save">{{ saving ? "Saving" : "Save" }}</button>
+        <button class="btn gold" type="button" :disabled="!dirty || saving" @click="save"><Save /> {{ saving ? "Saving" : "Save" }}</button>
         <template v-if="!confirmClose">
-          <button class="btn" type="button" @click="close()">Close</button>
+          <button class="btn" type="button" @click="close()"><X /> Close</button>
         </template>
         <template v-else>
           <span>Close without saving?</span>
@@ -195,13 +196,13 @@ async function onUpload(ev: Event) {
       </nav>
 
       <div class="row">
-        <button class="btn" type="button" @click="(creating = 'folder'), (newName = '')">New folder</button>
-        <button class="btn" type="button" @click="(creating = 'file'), (newName = '')">New file</button>
+        <button class="btn" type="button" @click="(creating = 'folder'), (newName = '')"><FolderPlus /> New folder</button>
+        <button class="btn" type="button" @click="(creating = 'file'), (newName = '')"><FilePlus /> New file</button>
         <label class="btn gold upload">
-          Upload
+          <Upload /> Upload
           <input type="file" multiple @change="onUpload" />
         </label>
-        <button class="btn" type="button" :disabled="loading" @click="load()">Refresh</button>
+        <button class="btn" type="button" :disabled="loading" @click="load()"><RefreshCw /> Refresh</button>
       </div>
 
       <form v-if="creating" class="row" @submit.prevent="create">
@@ -228,7 +229,10 @@ async function onUpload(ev: Event) {
           <button class="link name" type="button" @click="load(path.split('/').slice(0, -1).join('/'))">.. up one folder</button>
         </div>
         <div v-for="e in entries" :key="e.name" class="tr" role="row">
-          <span class="icon" :class="e.type" aria-hidden="true"></span>
+          <Folder v-if="e.type === 'dir'" class="ic-gold" aria-hidden="true" />
+          <LinkIcon v-else-if="e.type === 'link'" class="ic-bad" aria-hidden="true" />
+          <FileText v-else-if="/\.(ya?ml|json|properties|toml|txt|cfg|conf|ini|log|md|sh)$/i.test(e.name)" class="muted" aria-hidden="true" />
+          <File v-else class="muted" aria-hidden="true" />
           <template v-if="renaming === e.name">
             <form class="row grow" @submit.prevent="doRename(e)">
               <input v-model="renameTo" class="grow mono" />
@@ -241,10 +245,10 @@ async function onUpload(ev: Event) {
             <span class="muted meta">{{ e.type === "dir" ? "folder" : size(e.size) }}</span>
             <span class="muted meta when">{{ when(e.modified) }}</span>
             <span class="acts">
-              <a v-if="e.type === 'file'" class="btn small" :href="files.downloadUrl(id, join(e.name))">Download</a>
-              <button class="btn small" type="button" @click="(renaming = e.name), (renameTo = e.name)">Rename</button>
+              <a v-if="e.type === 'file'" class="btn small" :href="files.downloadUrl(id, join(e.name))" :aria-label="`Download ${e.name}`"><Download /></a>
+              <button class="btn small" type="button" @click="(renaming = e.name), (renameTo = e.name)" :aria-label="`Rename ${e.name}`"><Pencil /></button>
               <template v-if="deleting !== e.name">
-                <button class="btn small danger" type="button" @click="deleting = e.name">Delete</button>
+                <button class="btn small danger" type="button" :aria-label="`Delete ${e.name}`" @click="deleting = e.name"><Trash2 /></button>
               </template>
               <template v-else>
                 <button class="btn small danger" type="button" @click="doDelete(e)">Yes, delete</button>

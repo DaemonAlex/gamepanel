@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref } from "vue";
 import type { PlayerAction, PlayerRef, PlayersView } from "@gamepanel/shared";
+import { Ban, Crown, DoorOpen, Gavel, MessageSquare, ShieldCheck, ShieldOff, UserMinus, UserPlus, Users, Earth } from "lucide-vue-next";
 import { api } from "../api.js";
 
 const props = defineProps<{ id: string }>();
@@ -40,7 +41,11 @@ const known = computed(() => {
   const q = lower(filter.value.trim());
   return (view.value?.known ?? []).filter((p) => !q || lower(p.name).includes(q)).slice(0, 50);
 });
-const when = (iso: string | null) => (iso ? new Date(iso).toLocaleDateString(undefined, { day: "numeric", month: "short" }) : "-");
+const when = (iso: string | null) => {
+  if (!iso) return "-";
+  const d = new Date(iso);
+  return d.toLocaleDateString(undefined, d.getFullYear() === new Date().getFullYear() ? { day: "numeric", month: "short" } : { day: "numeric", month: "short", year: "numeric" });
+};
 
 async function act(a: PlayerAction) {
   if (!NAME.test(a.name)) {
@@ -87,17 +92,17 @@ function openBox(name: string, action: "kick" | "ban" | "tell") {
     <p v-if="error" class="error" role="alert">{{ error }}</p>
 
     <article class="panel">
-      <p class="label">Online now{{ view?.running ? ` (${view.online.length} of ${view.max})` : "" }}</p>
+      <p class="label"><Users />Online now{{ view?.running ? ` (${view.online.length} of ${view.max})` : "" }}</p>
       <div v-if="view?.online.length" class="rows">
         <div v-for="p in view.online" :key="p.name" class="prow">
           <img :src="head(p)" alt="" width="32" height="32" loading="lazy" />
           <span class="pname">{{ p.name }}</span>
           <span v-if="isOp(p.name)" class="tag">op</span>
           <span class="acts">
-            <button class="btn small" type="button" @click="openBox(p.name, 'tell')">Message</button>
-            <button class="btn small" type="button" @click="openBox(p.name, 'kick')">Kick</button>
-            <button class="btn small" type="button" :disabled="busy" @click="act({ action: isOp(p.name) ? 'deop' : 'op', name: p.name })">{{ isOp(p.name) ? "Deop" : "Op" }}</button>
-            <button class="btn small danger" type="button" @click="openBox(p.name, 'ban')">Ban</button>
+            <button class="btn small" type="button" @click="openBox(p.name, 'tell')"><MessageSquare /> Message</button>
+            <button class="btn small" type="button" @click="openBox(p.name, 'kick')"><DoorOpen /> Kick</button>
+            <button class="btn small" type="button" :disabled="busy" @click="act({ action: isOp(p.name) ? 'deop' : 'op', name: p.name })"><ShieldOff v-if="isOp(p.name)" /><ShieldCheck v-else /> {{ isOp(p.name) ? "Deop" : "Op" }}</button>
+            <button class="btn small danger" type="button" @click="openBox(p.name, 'ban')"><Ban /> Ban</button>
           </span>
           <form v-if="open?.name === p.name" class="row box" @submit.prevent="act({ action: open.action, name: p.name, text })">
             <label class="label" :for="`t-${p.name}`">{{ open.action === "tell" ? "Message" : "Reason (optional)" }}</label>
@@ -115,7 +120,7 @@ function openBox(name: string, action: "kick" | "ban" | "tell") {
     <div class="cols">
       <article class="panel">
         <div class="row between">
-          <p class="label">Whitelist ({{ view?.whitelist.length ?? 0 }})</p>
+          <p class="label"><ShieldCheck />Whitelist ({{ view?.whitelist.length ?? 0 }})</p>
           <button class="btn small" :class="view?.whitelistOn ? 'gold' : ''" type="button" :disabled="busy || !view?.running" @click="toggleWhitelist">
             {{ view?.whitelistOn ? "On: invite only" : "Off: anyone" }}
           </button>
@@ -123,44 +128,44 @@ function openBox(name: string, action: "kick" | "ban" | "tell") {
         <form class="row" @submit.prevent="act({ action: 'whitelist-add', name: addName.trim() }).then(() => (addName = ''))">
           <label for="wl-add" class="sr">Add to whitelist</label>
           <input id="wl-add" v-model="addName" placeholder="Minecraft name" maxlength="16" class="grow" />
-          <button class="btn small gold" type="submit" :disabled="busy || !addName.trim()">Add</button>
+          <button class="btn small gold" type="submit" :disabled="busy || !addName.trim()"><UserPlus /> Add</button>
         </form>
         <div class="rows">
           <div v-for="p in view?.whitelist ?? []" :key="p.name" class="prow">
             <img :src="head(p)" alt="" width="24" height="24" loading="lazy" />
             <span class="pname">{{ p.name }}</span>
-            <button class="btn small" type="button" :disabled="busy" @click="act({ action: 'whitelist-remove', name: p.name })">Remove</button>
+            <button class="btn small" type="button" :disabled="busy" @click="act({ action: 'whitelist-remove', name: p.name })"><UserMinus /> Remove</button>
           </div>
         </div>
         <p v-if="view && !view.whitelist.length" class="muted small">Empty. Operators can still join.</p>
       </article>
 
       <article class="panel">
-        <p class="label">Operators ({{ view?.ops.length ?? 0 }})</p>
+        <p class="label"><Crown />Operators ({{ view?.ops.length ?? 0 }})</p>
         <form class="row" @submit.prevent="act({ action: 'op', name: opName.trim() }).then(() => (opName = ''))">
           <label for="op-add" class="sr">Make operator</label>
           <input id="op-add" v-model="opName" placeholder="Minecraft name" maxlength="16" class="grow" />
-          <button class="btn small gold" type="submit" :disabled="busy || !opName.trim()">Make op</button>
+          <button class="btn small gold" type="submit" :disabled="busy || !opName.trim()"><Crown /> Make op</button>
         </form>
         <div class="rows">
           <div v-for="p in view?.ops ?? []" :key="p.name" class="prow">
             <img :src="head(p)" alt="" width="24" height="24" loading="lazy" />
             <span class="pname">{{ p.name }}</span>
             <span class="tag">level {{ p.level }}</span>
-            <button class="btn small" type="button" :disabled="busy" @click="act({ action: 'deop', name: p.name })">Deop</button>
+            <button class="btn small" type="button" :disabled="busy" @click="act({ action: 'deop', name: p.name })"><ShieldOff /> Deop</button>
           </div>
         </div>
       </article>
     </div>
 
     <article class="panel">
-      <p class="label">Banned ({{ view?.banned.length ?? 0 }} players, {{ view?.bannedIps.length ?? 0 }} addresses)</p>
+      <p class="label"><Gavel />Banned ({{ view?.banned.length ?? 0 }} players, {{ view?.bannedIps.length ?? 0 }} addresses)</p>
       <div class="rows">
         <div v-for="p in view?.banned ?? []" :key="p.name" class="prow">
           <img :src="head(p)" alt="" width="24" height="24" loading="lazy" />
           <span class="pname">{{ p.name }}</span>
           <span class="muted small grow">{{ p.reason }}</span>
-          <button class="btn small" type="button" :disabled="busy" @click="act({ action: 'pardon', name: p.name })">Pardon</button>
+          <button class="btn small" type="button" :disabled="busy" @click="act({ action: 'pardon', name: p.name })"><Gavel /> Pardon</button>
         </div>
         <div v-for="b in view?.bannedIps ?? []" :key="b.ip" class="prow">
           <span class="pname mono">{{ b.ip }}</span>
@@ -172,7 +177,7 @@ function openBox(name: string, action: "kick" | "ban" | "tell") {
 
     <article class="panel">
       <div class="row between">
-        <p class="label">Everyone seen ({{ view?.known.length ?? 0 }})</p>
+        <p class="label"><Earth />Everyone seen ({{ view?.known.length ?? 0 }})</p>
         <input v-model="filter" type="search" placeholder="Find a name" class="find" aria-label="Find a player" />
       </div>
       <div class="rows">
@@ -181,8 +186,8 @@ function openBox(name: string, action: "kick" | "ban" | "tell") {
           <span class="pname">{{ p.name }}</span>
           <span class="muted small">last seen {{ when(p.lastSeen) }}</span>
           <span class="acts">
-            <button v-if="!isListed(p.name)" class="btn small" type="button" :disabled="busy" @click="act({ action: 'whitelist-add', name: p.name })">Whitelist</button>
-            <button v-if="!isOp(p.name)" class="btn small" type="button" :disabled="busy" @click="act({ action: 'op', name: p.name })">Op</button>
+            <button v-if="!isListed(p.name)" class="btn small" type="button" :disabled="busy" @click="act({ action: 'whitelist-add', name: p.name })"><UserPlus /> Whitelist</button>
+            <button v-if="!isOp(p.name)" class="btn small" type="button" :disabled="busy" @click="act({ action: 'op', name: p.name })"><Crown /> Op</button>
             <button v-if="!isBanned(p.name)" class="btn small danger" type="button" @click="openBox(p.name, 'ban')">Ban</button>
           </span>
           <form v-if="open?.name === p.name && open.action === 'ban'" class="row box" @submit.prevent="act({ action: 'ban', name: p.name, text })">

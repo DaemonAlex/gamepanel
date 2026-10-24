@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, ref } from "vue";
 import type { ServerView } from "@gamepanel/shared";
+import { Check, Copy, Cpu, MemoryStick, Plug, Box, Users } from "lucide-vue-next";
 import { barClass, copy, gib, pct, stateOf } from "../format.js";
 
 const props = defineProps<{ server: ServerView; spark?: { cpu: number[]; players: number[] } | undefined }>();
@@ -33,21 +34,21 @@ async function copyAddress() {
     <div class="addr">
       <span class="mono">{{ server.address }}</span>
       <button class="btn small" type="button" :aria-label="`Copy address of ${server.name}`" @click="copyAddress">
-        {{ copied ? "Copied" : "Copy" }}
+        <Check v-if="copied" /><Copy v-else /> {{ copied ? "Copied" : "Copy" }}
       </button>
     </div>
     <dl>
-      <div><dt class="label">Type</dt><dd>{{ server.type }} {{ server.version }}</dd></div>
+      <div><dt class="label"><Box />Type</dt><dd>{{ server.type }} {{ server.version }}</dd></div>
       <div>
-        <dt class="label">Players</dt>
+        <dt class="label"><Users />Players</dt>
         <dd>{{ server.stats?.players ? `${server.stats.players.online} / ${server.stats.players.max}` : "-" }}</dd>
       </div>
-      <div><dt class="label">CPU</dt><dd>{{ server.stats ? `${server.stats.cpuPercent}%` : "-" }}</dd></div>
-      <div><dt class="label">Port</dt><dd class="mono">{{ server.port }}</dd></div>
+      <div><dt class="label"><Cpu />CPU</dt><dd>{{ server.stats ? `${server.stats.cpuPercent}%` : "-" }}</dd></div>
+      <div><dt class="label"><Plug />Port</dt><dd class="mono">{{ server.port }}</dd></div>
     </dl>
     <div>
       <div class="row between">
-        <span class="label">RAM</span>
+        <span class="label"><MemoryStick />RAM</span>
         <span class="mono small-text">{{ server.stats ? `${gib(server.stats.memoryBytes)} of ${gib(server.stats.memoryLimitBytes)}` : `${server.memoryMb} MB heap` }}</span>
       </div>
       <div :class="barClass(mem)"><span :style="{ width: `${mem}%` }"></span></div>

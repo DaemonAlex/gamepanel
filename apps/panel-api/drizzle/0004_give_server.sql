@@ -1,0 +1,1 @@
+ALTER TABLE "invites" ADD COLUMN "give_server_id" text;

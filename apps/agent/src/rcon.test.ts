@@ -1,11 +1,17 @@
 import { createServer, type Server } from "node:net";
 import { afterEach, describe, expect, it } from "vitest";
-import { parseList, parseMspt, parseTps, plain, rcon } from "./rcon.js";
+import { parseList, parseMspt, parseTps, plain, rcon, RconPool } from "./rcon.js";
 
 // A tiny fake RCON server: password "pw", echoes commands.
 let server: Server;
+let connections = 0;
+const sockets = new Set<import("node:net").Socket>();
 async function fake(): Promise<number> {
+  connections = 0;
   server = createServer((sock) => {
+    connections++;
+    sockets.add(sock);
+    sock.on("close", () => sockets.delete(sock));
     let buf = Buffer.alloc(0);
     sock.on("data", (c: Buffer) => {
       buf = Buffer.concat([buf, c]);
@@ -32,7 +38,10 @@ async function fake(): Promise<number> {
   await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
   return (server.address() as { port: number }).port;
 }
-afterEach(() => new Promise<void>((r) => (server ? server.close(() => r()) : r())));
+afterEach(() => {
+  for (const s of sockets) s.destroy();
+  return new Promise<void>((r) => (server ? server.close(() => r()) : r()));
+});
 
 describe("rcon", () => {
   it("logs in and runs commands in order", async () => {
@@ -43,6 +52,42 @@ describe("rcon", () => {
   it("fails on a wrong password", async () => {
     const port = await fake();
     await expect(rcon("127.0.0.1", port, "nope", ["tps"], 500)).rejects.toThrow(/login failed/);
+  });
+});
+
+describe("RconPool", () => {
+  it("reuses one connection for many polls", async () => {
+    const port = await fake();
+    const pool = new RconPool(1000);
+    for (let i = 0; i < 5; i++) expect(await pool.run("pw", "127.0.0.1", port, "pw", ["tps"])).toEqual(["ran: tps"]);
+    expect(connections).toBe(1);
+    pool.drop("pw");
+  });
+
+  it("runs commands for one server in order, even when called together", async () => {
+    const port = await fake();
+    const pool = new RconPool(1000);
+    const all = await Promise.all([1, 2, 3].map((n) => pool.run("pw", "127.0.0.1", port, "pw", [`say ${n}`])));
+    expect(all).toEqual([["ran: say 1"], ["ran: say 2"], ["ran: say 3"]]);
+    expect(connections).toBe(1);
+    pool.drop("pw");
+  });
+
+  it("reconnects once when the connection drops (server restart)", async () => {
+    const port = await fake();
+    const pool = new RconPool(1000);
+    await pool.run("pw", "127.0.0.1", port, "pw", ["tps"]);
+    for (const s of sockets) s.destroy();
+    await new Promise((r) => setTimeout(r, 30));
+    expect(await pool.run("pw", "127.0.0.1", port, "pw", ["tps"])).toEqual(["ran: tps"]);
+    expect(connections).toBe(2);
+    pool.drop("pw");
+  });
+
+  it("does not keep a connection with a wrong password", async () => {
+    const port = await fake();
+    const pool = new RconPool(500);
+    await expect(pool.run("pw", "127.0.0.1", port, "nope", ["tps"])).rejects.toThrow(/login failed|closed/);
   });
 });
 

@@ -77,6 +77,7 @@ describe("buildCreateOptions", () => {
     expect(o.Env).toContain("EULA=TRUE");
     expect(o.Env).toContain("RCON_PASSWORD_FILE=/run/gp/rcon-password");
     expect(o.Env).toContain("BROADCAST_RCON_TO_OPS=false");
+    expect(o.Env).toContain("USE_AIKAR_FLAGS=true");
     expect(h.Binds).toContain("/srv/gamepanel/secrets/homeworld/rcon-password:/run/gp/rcon-password:ro");
   });
 

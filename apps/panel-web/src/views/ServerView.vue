@@ -3,6 +3,7 @@ import { computed, defineAsyncComponent, onMounted, onUnmounted, ref } from "vue
 import type { PowerAction, ServerView } from "@gamepanel/shared";
 import { api } from "../api.js";
 import ConsolePanel from "../components/ConsolePanel.vue";
+import { Archive, ArrowLeft, CalendarClock, Database, FolderOpen, Puzzle, ScrollText, LayoutDashboard, Play, RotateCw, Skull, SlidersHorizontal, Square, Terminal, Users } from "lucide-vue-next";
 import OverviewPanel from "../components/OverviewPanel.vue";
 import PlayersPanel from "../components/PlayersPanel.vue";
 import { stateOf, uptime } from "../format.js";
@@ -16,11 +17,24 @@ let timer: ReturnType<typeof setInterval> | undefined;
 
 // The file manager carries the code editor, so it loads only when opened.
 const FilesPanel = defineAsyncComponent(() => import("../components/FilesPanel.vue"));
+const SettingsPanel = defineAsyncComponent(() => import("../components/SettingsPanel.vue"));
+const BackupsPanel = defineAsyncComponent(() => import("../components/BackupsPanel.vue"));
+const SchedulesPanel = defineAsyncComponent(() => import("../components/SchedulesPanel.vue"));
+const PluginsPanel = defineAsyncComponent(() => import("../components/PluginsPanel.vue"));
+const LogsPanel = defineAsyncComponent(() => import("../components/LogsPanel.vue"));
+const VersionPanel = defineAsyncComponent(() => import("../components/VersionPanel.vue"));
+const DatabasesPanel = defineAsyncComponent(() => import("../components/DatabasesPanel.vue"));
 
 // Tabs; the choice is kept in the address (#files) so a reload stays put.
-const tabs = ["overview", "console", "players", "files"] as const;
+const tabs = ["overview", "console", "players", "plugins", "files", "databases", "backups", "schedules", "logs", "settings"] as const;
 type Tab = (typeof tabs)[number];
 const tab = ref<Tab>(tabs.includes(location.hash.slice(1) as Tab) ? (location.hash.slice(1) as Tab) : "overview");
+const SharingPanel = defineAsyncComponent(() => import("../components/SharingPanel.vue"));
+// Tabs a subuser was not given are hidden; owners and admins see all.
+const tabPerm: Record<Tab, string | null> = { overview: null, console: "console", players: "players", plugins: "plugins", files: "files", databases: "databases", backups: "backups", schedules: "schedules", logs: "logs", settings: "settings" };
+const can = (p: string | null) => !p || !!server.value?.perms.some((x) => x === "all" || x === p);
+const owner = computed(() => !!server.value?.perms.includes("all"));
+const tabIcon = { overview: LayoutDashboard, console: Terminal, players: Users, settings: SlidersHorizontal, files: FolderOpen, databases: Database, backups: Archive, schedules: CalendarClock, plugins: Puzzle, logs: ScrollText } as const;
 function pick(t: Tab) {
   tab.value = t;
   history.replaceState(null, "", `#${t}`);
@@ -61,7 +75,7 @@ async function power(action: PowerAction) {
 
 <template>
   <main class="wrap">
-    <RouterLink to="/" class="label">&larr; All servers</RouterLink>
+    <RouterLink to="/" class="label"><ArrowLeft />All servers</RouterLink>
     <p v-if="error" class="error" role="alert">{{ error }}</p>
 
     <template v-if="server">
@@ -78,11 +92,11 @@ async function power(action: PowerAction) {
       </section>
 
       <section class="panel row">
-        <button class="btn gold" type="button" :disabled="isUp || !!busy" @click="power('start')">Start</button>
-        <button class="btn" type="button" :disabled="!isUp || !!busy" @click="power('stop')">Stop</button>
-        <button class="btn" type="button" :disabled="!isUp || !!busy" @click="power('restart')">Restart</button>
+        <button class="btn gold" type="button" :disabled="isUp || !!busy || !can('power')" @click="power('start')"><Play /> Start</button>
+        <button class="btn" type="button" :disabled="!isUp || !!busy || !can('power')" @click="power('stop')"><Square /> Stop</button>
+        <button class="btn" type="button" :disabled="!isUp || !!busy || !can('power')" @click="power('restart')"><RotateCw /> Restart</button>
         <template v-if="!confirmKill">
-          <button class="btn danger" type="button" :disabled="!isUp || !!busy" @click="confirmKill = true">Kill</button>
+          <button class="btn danger" type="button" :disabled="!isUp || !!busy" @click="confirmKill = true" v-show="can('power')"><Skull /> Kill</button>
         </template>
         <template v-else>
           <span>Kill skips saving the world. Sure?</span>
@@ -93,14 +107,22 @@ async function power(action: PowerAction) {
       </section>
 
       <nav class="tabs" role="tablist" aria-label="Server sections">
-        <button v-for="t in tabs" :key="t" type="button" role="tab" :aria-selected="tab === t" :class="{ on: tab === t }" @click="pick(t)">{{ t }}</button>
+        <button v-for="t in tabs.filter((x) => can(tabPerm[x]))" :key="t" type="button" role="tab" :aria-selected="tab === t" :class="{ on: tab === t }" @click="pick(t)"><component :is="tabIcon[t]" /> {{ t }}</button>
       </nav>
 
       <OverviewPanel v-if="tab === 'overview'" :server="server" />
 
       <ConsolePanel v-if="tab === 'console'" :id="server.id" class="panel" />
       <PlayersPanel v-if="tab === 'players'" :id="server.id" />
+      <VersionPanel v-if="tab === 'settings'" :id="server.id" :type="server.type" :version="server.version" :running="isUp" @changed="load" />
+      <PluginsPanel v-if="tab === 'plugins'" :id="server.id" :running="isUp" />
+      <LogsPanel v-if="tab === 'logs'" :id="server.id" />
+      <SharingPanel v-if="tab === 'settings' && owner" :id="server.id" />
+      <SettingsPanel v-if="tab === 'settings'" :id="server.id" :running="isUp" @restarted="load" />
+      <BackupsPanel v-if="tab === 'backups'" :id="server.id" :running="isUp" @changed="load" />
+      <SchedulesPanel v-if="tab === 'schedules'" :id="server.id" />
       <FilesPanel v-if="tab === 'files'" :id="server.id" class="panel" />
+      <DatabasesPanel v-if="tab === 'databases'" :id="server.id" />
     </template>
   </main>
 </template>
@@ -118,7 +140,7 @@ async function power(action: PowerAction) {
 .num { font: 900 26px var(--font); font-variant-numeric: tabular-nums; margin: 4px 0 6px !important; }
 .small { font-size: 13px; }
 .tabs { display: flex; gap: 4px; flex-wrap: wrap; border-bottom: 1px solid var(--line); }
-.tabs button { font: 600 13px var(--mono); letter-spacing: 0.06em; text-transform: uppercase; padding: 8px 14px; background: transparent; color: var(--ink2); border: 1px solid transparent; border-bottom: 0; cursor: pointer; }
+.tabs button { display: inline-flex; align-items: center; gap: 6px; font: 600 13px var(--mono); letter-spacing: 0.06em; text-transform: uppercase; padding: 8px 14px; background: transparent; color: var(--ink2); border: 1px solid transparent; border-bottom: 0; cursor: pointer; }
 .tabs button.on { background: var(--gold); color: var(--sea); }
 .tabs button:focus-visible { outline: 2px solid var(--gold); outline-offset: 2px; }
 </style>

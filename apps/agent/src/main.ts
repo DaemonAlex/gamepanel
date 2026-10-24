@@ -6,6 +6,11 @@ import { Servers } from "./servers.js";
 const cfg = loadConfig();
 const servers = new Servers(cfg);
 await servers.ensureNetwork();
+// Put back each server's private database link (best effort; the routes retry it).
+await servers
+  .list()
+  .then((all) => servers.databases.relinkAll(all.map((s) => s.id)))
+  .catch(() => {});
 
 const app = await buildApp(cfg.token, servers, {
   logger: true,

@@ -65,6 +65,8 @@ export function buildCreateOptions(cfg: AgentConfig, spec: ServerSpec): Containe
     `STOP_DURATION=${STOP_DURATION_S}`,
     // The agent creates the folder already owned by MC_UID.
     "SKIP_CHOWN_DATA=true",
+    // Paper's recommended garbage-collector tuning: shorter pauses, less stutter.
+    "USE_AIKAR_FLAGS=true",
   ];
   if (spec.motd) env.push(`MOTD=${spec.motd}`);
 

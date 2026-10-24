@@ -9,8 +9,30 @@ export const users = pgTable("users", {
   passwordHash: text("password_hash").notNull(),
   role: roleEnum("role").notNull().default("owner"),
   disabled: boolean("disabled").notNull().default(false),
+  // Two-step login (authenticator app). The secret is encrypted with APP_SECRET.
+  totpSecretEnc: text("totp_secret_enc"),
+  totpEnabled: boolean("totp_enabled").notNull().default(false),
+  // Quotas for owners (admins have none).
+  maxServers: integer("max_servers").notNull().default(1),
+  maxMemoryMb: integer("max_memory_mb").notNull().default(4096),
+  maxDiskGb: integer("max_disk_gb").notNull().default(20),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 }, (t) => [uniqueIndex("users_email_lower").on(sql`lower(${t.email})`)]);
+
+// One-time links: an invite to join, or a password reset. Only the hash of the token is stored.
+export const invites = pgTable("invites", {
+  tokenHash: text("token_hash").primaryKey(),
+  kind: text("kind").notNull(),
+  email: text("email").notNull(),
+  role: roleEnum("role").notNull().default("owner"),
+  userId: text("user_id"),
+  // A server handed to this person when they join (ownership moves to them).
+  giveServerId: text("give_server_id"),
+  createdBy: text("created_by").notNull(),
+  expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+  usedAt: timestamp("used_at", { withTimezone: true }),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+});
 
 // Only a hash of the session id is stored, so a database leak does not leak live sessions.
 export const sessions = pgTable("sessions", {
@@ -49,6 +71,10 @@ export const servers = pgTable("servers", {
   port: integer("port").notNull(),
   // Hostname players use, when DNS is set up for it.
   hostname: text("hostname"),
+  // How many backups to keep; older ones are removed after each good backup.
+  backupKeep: integer("backup_keep").notNull().default(7),
+  // Disk cap for the server folder, enforced on the node.
+  diskGb: integer("disk_gb").notNull().default(20),
   eulaAcceptedBy: text("eula_accepted_by").notNull().references(() => users.id),
   eulaAcceptedAt: timestamp("eula_accepted_at", { withTimezone: true }).notNull(),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
@@ -88,3 +114,27 @@ export const nodeSamples = pgTable("node_samples", {
   diskFreeBytes: bigint("disk_free_bytes", { mode: "number" }).notNull(),
   running: integer("running").notNull(),
 }, (t) => [index("node_samples_node_at").on(t.nodeId, t.at)]);
+
+export const schedules = pgTable("schedules", {
+  id: text("id").primaryKey(),
+  serverId: text("server_id").notNull().references(() => servers.id, { onDelete: "cascade" }),
+  action: text("action").notNull(),
+  payload: text("payload").notNull().default(""),
+  kind: text("kind").notNull(),
+  minutes: integer("minutes").notNull().default(60),
+  time: text("time").notNull().default("04:00"),
+  days: jsonb("days").$type<number[]>().notNull(),
+  tz: text("tz").notNull().default("UTC"),
+  enabled: boolean("enabled").notNull().default(true),
+  lastRunAt: timestamp("last_run_at", { withTimezone: true }),
+  lastResult: text("last_result"),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+}, (t) => [index("schedules_server").on(t.serverId)]);
+
+// People other than the owner who may use a server, and what they may do.
+export const serverAccess = pgTable("server_access", {
+  serverId: text("server_id").notNull().references(() => servers.id, { onDelete: "cascade" }),
+  userId: text("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  perms: jsonb("perms").$type<string[]>().notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+}, (t) => [uniqueIndex("server_access_pair").on(t.serverId, t.userId), index("server_access_user").on(t.userId)]);

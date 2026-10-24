@@ -4,12 +4,18 @@ import { cpus, totalmem } from "node:os";
 import { dirname } from "node:path";
 import { PassThrough, type Readable } from "node:stream";
 import Docker from "dockerode";
+import { checkProperty } from "@gamepanel/shared";
 import type { NodeInfo, PlayerAction, PlayersView, PowerAction, ServerId, ServerInfo, ServerSample, ServerSpec, ServerState, ServerStats, ServerStatus } from "@gamepanel/shared";
 import { readFile } from "node:fs/promises";
-import { ServerFiles } from "./files.js";
-import { folderBytes, listJars, parseProperties } from "./info.js";
+import { Backups, LocalStore } from "./backups.js";
+import { Databases } from "./databases.js";
+import { Quotas } from "./quota.js";
+import { FileError, ServerFiles } from "./files.js";
+import { folderBytes, listJars } from "./info.js";
 import { commandFor, readPlayerFiles } from "./players.js";
-import { parseList, parseMspt, parseTps, plain, rcon } from "./rcon.js";
+import { readProperties, withoutSecrets, writeProperties } from "./properties-file.js";
+import { copyFile } from "node:fs/promises";
+import { parseList, parseMspt, parseTps, plain, RconPool } from "./rcon.js";
 import { chownTree, detect, extractArchive, findLayout, fixServerPropertiesFile, type ArchiveFormat, type Detected } from "./import.js";
 import type { AgentConfig } from "./config.js";
 import { buildCreateOptions, containerName, imageFor, LABEL, MC_UID, rconPasswordFile, serverDir, STOP_TIMEOUT_S } from "./containers.js";
@@ -48,10 +54,32 @@ function stateFrom(info: Docker.ContainerInspectInfo): ServerState {
 }
 
 export class Servers {
+  readonly backups: Backups;
+  readonly quotas: Quotas;
+  readonly databases: Databases;
+  // One kept-open RCON connection per server (new connections spam the server log).
+  private readonly rconPool = new RconPool();
+
   constructor(
     private readonly cfg: AgentConfig,
     private readonly docker: Docker = new Docker(),
-  ) {}
+  ) {
+    this.quotas = new Quotas(cfg.dataRoot.replace(/\/servers$/, ""));
+    this.backups = new Backups(new LocalStore(`${cfg.backupRoot}/archives`), {
+      serverDir: (id) => serverDir(cfg, id),
+      dataRoot: cfg.dataRoot,
+      preRestoreRoot: `${cfg.backupRoot}/pre-restore`,
+      isRunning: async (id) => {
+        const s = await this.status(id);
+        return s.state === "running" || s.state === "starting" || s.state === "restarting";
+      },
+      rcon: (id, commands) => this.rconRun(id, commands),
+      uid: MC_UID,
+      afterRestore: (id) => this.quotas.reapply(id, serverDir(cfg, id)),
+      beforeArchive: (id, dir) => this.databases.dumpForBackup(id, dir),
+    });
+    this.databases = new Databases(cfg, docker);
+  }
 
   // One bridge network for all game containers. Containers on it cannot reach
   // each other (icc off); the node firewall keeps them off private ranges.
@@ -105,9 +133,12 @@ export class Servers {
     }
     await this.ensureNetwork();
     await this.prepareFiles(spec.id);
+    if (spec.diskGb) await this.quotas.set(spec.id, serverDir(this.cfg, spec.id), spec.diskGb);
     await this.pullIfMissing(imageFor(this.cfg, spec));
     await this.removeContainer(spec.id);
     await this.docker.createContainer(buildCreateOptions(this.cfg, spec));
+    // A new container starts without the database link; put it back.
+    await this.databases.relink(spec.id);
     return this.status(spec.id);
   }
 
@@ -191,6 +222,7 @@ export class Servers {
       }
       await fixServerPropertiesFile(target);
       await chownTree(target, MC_UID, MC_UID);
+      await this.quotas.reapply(id, target);
       return { kind: layout.kind, worlds: layout.worlds, entries, backup, detected: await detect(target) };
     } finally {
       await rm(staging, { recursive: true, force: true });
@@ -206,7 +238,7 @@ export class Servers {
   async info(id: ServerId): Promise<ServerInfo> {
     const files = this.files(id);
     const dir = serverDir(this.cfg, id);
-    const props = parseProperties(await files.readText("server.properties").catch(() => ""));
+    const props = readProperties(await files.readText("server.properties").catch(() => ""));
 
     let build: string | null = null;
     try {
@@ -242,7 +274,7 @@ export class Servers {
     }
 
     return {
-      properties: props,
+      properties: withoutSecrets(props),
       build,
       java: image?.match(/java(\d+)/)?.[1] ?? null,
       image,
@@ -275,13 +307,39 @@ export class Servers {
     };
   }
 
+  async properties(id: ServerId): Promise<Record<string, string>> {
+    return withoutSecrets(readProperties(await this.files(id).readText("server.properties").catch(() => "")));
+  }
+
+  // Save settings. Every change is checked against the allowed fields; the old
+  // file is copied to backups/settings/<id>/ first. Takes effect on restart.
+  async setProperties(id: ServerId, changes: Record<string, string>): Promise<{ backup: string; changed: string[] }> {
+    const clean: Record<string, string> = {};
+    for (const [k, v] of Object.entries(changes)) {
+      const r = checkProperty(k, v);
+      if (!r.ok) throw new FileError(r.error);
+      clean[k] = r.value;
+    }
+    const files = this.files(id);
+    const current = await files.readText("server.properties").catch(() => "");
+    const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+    const dir = `${this.cfg.backupRoot}/settings/${id}`;
+    await mkdir(dir, { recursive: true, mode: 0o750 });
+    const backup = `${dir}/server.properties.${stamp}`;
+    if (current) {
+      await copyFile(await files.safeFile("server.properties"), backup);
+    }
+    await files.writeText("server.properties", writeProperties(current, clean));
+    return { backup, changed: Object.keys(clean) };
+  }
+
   // Run commands over RCON on a running server and return the plain answers.
   private async rconRun(id: ServerId, commands: string[]): Promise<string[]> {
     const c = await this.docker.getContainer(containerName(id)).inspect();
     const ip = c.NetworkSettings.Networks[this.cfg.network]?.IPAddress;
     if (!c.State.Running || !ip) throw new ConflictError("the server is not running");
     const password = (await readFile(rconPasswordFile(this.cfg, id), "utf8")).trim();
-    return (await rcon(ip, 25575, password, commands)).map(plain);
+    return (await this.rconPool.run(id, ip, 25575, password, commands)).map(plain);
   }
 
   async players(id: ServerId): Promise<PlayersView> {
@@ -319,7 +377,7 @@ export class Servers {
     try {
       const password = (await readFile(rconPasswordFile(this.cfg, id), "utf8")).trim();
       // minecraft:list skips plugins (like Essentials) that replace "list".
-      const [tps, mspt, list] = await rcon(ip, 25575, password, ["tps", "mspt", "minecraft:list uuids"]);
+      const [tps, mspt, list] = await this.rconPool.run(id, ip, 25575, password, ["tps", "mspt", "minecraft:list uuids"]);
       const players = parseList(list ?? "");
       return {
         tps: parseTps(tps ?? ""),
@@ -331,6 +389,11 @@ export class Servers {
     } catch {
       return null;
     }
+  }
+
+  async setDisk(id: ServerId, gb: number) {
+    await this.quotas.set(id, serverDir(this.cfg, id), gb);
+    return this.quotas.usage(id);
   }
 
   // Every game server container on this node, by label.
