@@ -260,10 +260,95 @@ export const versionCheckSchema = z.object({
   to: z.string().regex(/^\d+\.\d+(?:\.\d+)?$/),
 });
 
+// --- databases ---
+// Each server can own MariaDB databases on its node. Plugins reach them on the
+// server's own private link at host "gp-db"; nothing else can.
+
+// What the user picks; the full name is prefixed with the server id.
+export const dbLabelSchema = z.string().regex(/^[a-z][a-z0-9_]{0,19}$/, "1 to 20 lowercase letters, digits or _, starting with a letter");
+export const dbNameSchema = z.string().regex(/^[a-z0-9_]{1,64}$/);
+// A table or column name as MariaDB reports it.
+export const dbIdentSchema = z.string().min(1).max(64).regex(/^[^\0`]+$/);
+
+export interface DatabaseInfo {
+  name: string;
+  user: string;
+  host: string;
+  port: number;
+  bytes: number;
+  tables: number;
+  createdAt: string;
+}
+
+export interface DatabasesView {
+  // False until the node runs the database service.
+  ready: boolean;
+  databases: DatabaseInfo[];
+}
+
+export interface TableInfo {
+  name: string;
+  rows: number;
+  bytes: number;
+  // Columns of the primary key; rows can only be edited when there is one.
+  primaryKey: string[];
+}
+
+export interface ColumnInfo {
+  name: string;
+  type: string;
+  nullable: boolean;
+  // Binary columns are shown as hex and cannot be edited here.
+  binary: boolean;
+}
+
+// Cells come back as text (null stays null). Binary values are hex, cut short.
+export interface QueryResult {
+  columns: string[];
+  rows: (string | null)[][];
+  // Rows changed by a write.
+  affected?: number;
+  // More rows existed than were returned.
+  truncated: boolean;
+  // The snapshot taken before a change, if any.
+  snapshot?: string;
+}
+
+export interface TableRows extends QueryResult {
+  columnInfo: ColumnInfo[];
+  primaryKey: string[];
+  page: number;
+  pageSize: number;
+  total: number;
+}
+
+export const dbCreateSchema = z.object({ label: dbLabelSchema });
+
+export const dbQuerySchema = z.object({
+  sql: z.string().trim().min(1).max(20_000),
+  // Without this the query runs read-only and any change is refused.
+  write: z.boolean().default(false),
+});
+
+export const dbRowsQuerySchema = z.object({
+  table: dbIdentSchema,
+  page: z.coerce.number().int().min(0).max(1_000_000).default(0),
+  pageSize: z.coerce.number().int().min(10).max(200).default(50),
+});
+
+const cell = z.string().max(65_535).nullable();
+export const dbRowEditSchema = z.object({
+  table: dbIdentSchema,
+  // The row's primary key values, exactly.
+  key: z.record(dbIdentSchema, cell),
+  // Columns to change (update only).
+  set: z.record(dbIdentSchema, cell).optional(),
+});
+
 // --- people and access ---
 
 // What a subuser may be allowed on a server. Owners and admins have all of them.
-export const serverPerms = ["console", "power", "players", "files", "plugins", "backups", "schedules", "logs", "settings"] as const;
+export const serverPerms = ["console", "power", "players", "files", "plugins", "backups", "schedules", "logs", "settings", "databases"] as const;
 export type ServerPerm = (typeof serverPerms)[number];
 export const permLabels: Record<ServerPerm, string> = {
   console: "Console and commands",
@@ -275,6 +360,7 @@ export const permLabels: Record<ServerPerm, string> = {
   schedules: "Schedules",
   logs: "Logs",
   settings: "Settings and version",
+  databases: "Databases (view and edit)",
 };
 
 export const inviteSchema = z.object({

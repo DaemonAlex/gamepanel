@@ -3,7 +3,7 @@ import { computed, defineAsyncComponent, onMounted, onUnmounted, ref } from "vue
 import type { PowerAction, ServerView } from "@gamepanel/shared";
 import { api } from "../api.js";
 import ConsolePanel from "../components/ConsolePanel.vue";
-import { Archive, ArrowLeft, CalendarClock, FolderOpen, Puzzle, ScrollText, LayoutDashboard, Play, RotateCw, Skull, SlidersHorizontal, Square, Terminal, Users } from "lucide-vue-next";
+import { Archive, ArrowLeft, CalendarClock, Database, FolderOpen, Puzzle, ScrollText, LayoutDashboard, Play, RotateCw, Skull, SlidersHorizontal, Square, Terminal, Users } from "lucide-vue-next";
 import OverviewPanel from "../components/OverviewPanel.vue";
 import PlayersPanel from "../components/PlayersPanel.vue";
 import { stateOf, uptime } from "../format.js";
@@ -23,17 +23,18 @@ const SchedulesPanel = defineAsyncComponent(() => import("../components/Schedule
 const PluginsPanel = defineAsyncComponent(() => import("../components/PluginsPanel.vue"));
 const LogsPanel = defineAsyncComponent(() => import("../components/LogsPanel.vue"));
 const VersionPanel = defineAsyncComponent(() => import("../components/VersionPanel.vue"));
+const DatabasesPanel = defineAsyncComponent(() => import("../components/DatabasesPanel.vue"));
 
 // Tabs; the choice is kept in the address (#files) so a reload stays put.
-const tabs = ["overview", "console", "players", "plugins", "files", "backups", "schedules", "logs", "settings"] as const;
+const tabs = ["overview", "console", "players", "plugins", "files", "databases", "backups", "schedules", "logs", "settings"] as const;
 type Tab = (typeof tabs)[number];
 const tab = ref<Tab>(tabs.includes(location.hash.slice(1) as Tab) ? (location.hash.slice(1) as Tab) : "overview");
 const SharingPanel = defineAsyncComponent(() => import("../components/SharingPanel.vue"));
 // Tabs a subuser was not given are hidden; owners and admins see all.
-const tabPerm: Record<Tab, string | null> = { overview: null, console: "console", players: "players", plugins: "plugins", files: "files", backups: "backups", schedules: "schedules", logs: "logs", settings: "settings" };
+const tabPerm: Record<Tab, string | null> = { overview: null, console: "console", players: "players", plugins: "plugins", files: "files", databases: "databases", backups: "backups", schedules: "schedules", logs: "logs", settings: "settings" };
 const can = (p: string | null) => !p || !!server.value?.perms.some((x) => x === "all" || x === p);
 const owner = computed(() => !!server.value?.perms.includes("all"));
-const tabIcon = { overview: LayoutDashboard, console: Terminal, players: Users, settings: SlidersHorizontal, files: FolderOpen, backups: Archive, schedules: CalendarClock, plugins: Puzzle, logs: ScrollText } as const;
+const tabIcon = { overview: LayoutDashboard, console: Terminal, players: Users, settings: SlidersHorizontal, files: FolderOpen, databases: Database, backups: Archive, schedules: CalendarClock, plugins: Puzzle, logs: ScrollText } as const;
 function pick(t: Tab) {
   tab.value = t;
   history.replaceState(null, "", `#${t}`);
@@ -121,6 +122,7 @@ async function power(action: PowerAction) {
       <BackupsPanel v-if="tab === 'backups'" :id="server.id" :running="isUp" @changed="load" />
       <SchedulesPanel v-if="tab === 'schedules'" :id="server.id" />
       <FilesPanel v-if="tab === 'files'" :id="server.id" class="panel" />
+      <DatabasesPanel v-if="tab === 'databases'" :id="server.id" />
     </template>
   </main>
 </template>

@@ -8,6 +8,7 @@ import { checkProperty } from "@gamepanel/shared";
 import type { NodeInfo, PlayerAction, PlayersView, PowerAction, ServerId, ServerInfo, ServerSample, ServerSpec, ServerState, ServerStats, ServerStatus } from "@gamepanel/shared";
 import { readFile } from "node:fs/promises";
 import { Backups, LocalStore } from "./backups.js";
+import { Databases } from "./databases.js";
 import { Quotas } from "./quota.js";
 import { FileError, ServerFiles } from "./files.js";
 import { folderBytes, listJars } from "./info.js";
@@ -55,6 +56,7 @@ function stateFrom(info: Docker.ContainerInspectInfo): ServerState {
 export class Servers {
   readonly backups: Backups;
   readonly quotas: Quotas;
+  readonly databases: Databases;
   // One kept-open RCON connection per server (new connections spam the server log).
   private readonly rconPool = new RconPool();
 
@@ -74,7 +76,9 @@ export class Servers {
       rcon: (id, commands) => this.rconRun(id, commands),
       uid: MC_UID,
       afterRestore: (id) => this.quotas.reapply(id, serverDir(cfg, id)),
+      beforeArchive: (id, dir) => this.databases.dumpForBackup(id, dir),
     });
+    this.databases = new Databases(cfg, docker);
   }
 
   // One bridge network for all game containers. Containers on it cannot reach
@@ -133,6 +137,8 @@ export class Servers {
     await this.pullIfMissing(imageFor(this.cfg, spec));
     await this.removeContainer(spec.id);
     await this.docker.createContainer(buildCreateOptions(this.cfg, spec));
+    // A new container starts without the database link; put it back.
+    await this.databases.relink(spec.id);
     return this.status(spec.id);
   }
 

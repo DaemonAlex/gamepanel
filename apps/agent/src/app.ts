@@ -2,9 +2,25 @@ import type { Readable } from "node:stream";
 import Fastify, { type FastifyInstance, type FastifyServerOptions } from "fastify";
 import websocket from "@fastify/websocket";
 import { ZodError } from "zod";
-import { backupNameSchema, consoleInSchema, playerActionSchema, propertyChangesSchema, powerActionSchema, serverIdSchema, serverSpecSchema, whitelistToggleSchema, type ConsoleOut } from "@gamepanel/shared";
+import {
+  backupNameSchema,
+  consoleInSchema,
+  dbCreateSchema,
+  dbNameSchema,
+  dbQuerySchema,
+  dbRowEditSchema,
+  dbRowsQuerySchema,
+  playerActionSchema,
+  propertyChangesSchema,
+  powerActionSchema,
+  serverIdSchema,
+  serverSpecSchema,
+  whitelistToggleSchema,
+  type ConsoleOut,
+} from "@gamepanel/shared";
 import { tokenMatches } from "./auth.js";
 import { BackupError } from "./backups.js";
+import { DbError } from "./db-sql.js";
 import { FileError } from "./files.js";
 import { listLogs, readLog } from "./logs.js";
 import { installFromUrl, listPlugins, setEnabled } from "./plugins.js";
@@ -32,6 +48,7 @@ export async function buildApp(token: string, servers: Servers, opts: FastifySer
     if (err instanceof ImportError) return reply.code(422).send({ error: err.message });
     if (err instanceof FileError) return reply.code(err.status).send({ error: err.message });
     if (err instanceof BackupError) return reply.code(err.status).send({ error: err.message });
+    if (err instanceof DbError) return reply.code(err.status).send({ error: err.message });
     if (err instanceof ZodError) return reply.code(400).send({ error: "invalid request" });
     app.log.error(err);
     return reply.code(500).send({ error: "agent error" });
@@ -88,6 +105,57 @@ export async function buildApp(token: string, servers: Servers, opts: FastifySer
       ...(str(b.sha256) ? { sha256: str(b.sha256)! } : {}),
       ...(str(b.sha1) ? { sha1: str(b.sha1)! } : {}),
     });
+  });
+
+  // --- databases ---------------------------------------------------------------
+  const dbOf = (params: unknown) => ({ id: parseId(params), db: dbNameSchema.parse((params as { db?: unknown }).db) });
+
+  app.get("/v1/servers/:id/databases", async (req) => servers.databases.list(parseId(req.params)));
+
+  app.post("/v1/servers/:id/databases", async (req) => servers.databases.create(parseId(req.params), dbCreateSchema.parse(req.body).label));
+
+  app.get("/v1/servers/:id/databases/:db/password", async (req) => {
+    const { id, db } = dbOf(req.params);
+    return servers.databases.password(id, db);
+  });
+
+  app.post("/v1/servers/:id/databases/:db/password", async (req) => {
+    const { id, db } = dbOf(req.params);
+    return servers.databases.resetPassword(id, db);
+  });
+
+  app.delete("/v1/servers/:id/databases/:db", async (req) => {
+    const { id, db } = dbOf(req.params);
+    return servers.databases.remove(id, db);
+  });
+
+  app.get("/v1/servers/:id/databases/:db/tables", async (req) => {
+    const { id, db } = dbOf(req.params);
+    return servers.databases.tables(id, db);
+  });
+
+  app.get("/v1/servers/:id/databases/:db/rows", async (req) => {
+    const { id, db } = dbOf(req.params);
+    const q = dbRowsQuerySchema.parse(req.query);
+    return servers.databases.rows(id, db, q.table, q.page, q.pageSize);
+  });
+
+  app.post("/v1/servers/:id/databases/:db/query", async (req) => {
+    const { id, db } = dbOf(req.params);
+    const q = dbQuerySchema.parse(req.body);
+    return servers.databases.query(id, db, q.sql, q.write);
+  });
+
+  app.post("/v1/servers/:id/databases/:db/rows/update", { bodyLimit: 1024 * 1024 }, async (req) => {
+    const { id, db } = dbOf(req.params);
+    const e = dbRowEditSchema.parse(req.body);
+    return servers.databases.updateRow(id, db, e.table, e.key, e.set ?? {});
+  });
+
+  app.post("/v1/servers/:id/databases/:db/rows/delete", { bodyLimit: 1024 * 1024 }, async (req) => {
+    const { id, db } = dbOf(req.params);
+    const e = dbRowEditSchema.parse(req.body);
+    return servers.databases.deleteRow(id, db, e.table, e.key);
   });
 
   // --- logs --------------------------------------------------------------------

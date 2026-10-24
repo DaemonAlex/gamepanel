@@ -20,6 +20,11 @@ import {
   installSchema,
   versionChangeSchema,
   versionCheckSchema,
+  dbCreateSchema,
+  dbNameSchema,
+  dbQuerySchema,
+  dbRowEditSchema,
+  dbRowsQuerySchema,
   type PluginsView,
   type PluginReadiness,
   type VersionJob,
@@ -775,6 +780,87 @@ export async function buildApp({ cfg, db, nodes }: AppDeps, opts: { logger?: boo
     const r = await t.client.removeFile(t.row.id, `${t.folder}/${file}`);
     await audit(db, { userId: t.me.id, action: "plugin.delete", serverId: t.row.id, ip: t.ip, detail: { file, trashedTo: r.trashedTo } });
     return { ok: true };
+  });
+
+  // --- databases -----------------------------------------------------------------------
+  // MariaDB databases owned by a server. Reading uses a read-only login on the
+  // node; every change is logged and snapshotted there first.
+
+  async function dbTarget(req: FastifyRequest, withName = true) {
+    const me = requireMe(req);
+    const params = req.params as { id: string; db?: string };
+    const { row, node } = await serverFor(me, params.id, "databases");
+    const name = withName ? dbNameSchema.parse(params.db) : "";
+    return { me, ip: req.ip, id: row.id, name, client: nodes.client(node) };
+  }
+
+  app.get("/api/servers/:id/databases", async (req) => {
+    const t = await dbTarget(req, false);
+    return t.client.databases(t.id);
+  });
+
+  app.post("/api/servers/:id/databases", async (req) => {
+    const t = await dbTarget(req, false);
+    const { label } = dbCreateSchema.parse(req.body);
+    const created = await t.client.createDatabase(t.id, label);
+    await audit(db, { userId: t.me.id, action: "database.create", serverId: t.id, ip: t.ip, detail: { name: created.name } });
+    return created;
+  });
+
+  app.get("/api/servers/:id/databases/:db/password", async (req) => {
+    const t = await dbTarget(req);
+    await audit(db, { userId: t.me.id, action: "database.password.view", serverId: t.id, ip: t.ip, detail: { name: t.name } });
+    return t.client.databasePassword(t.id, t.name);
+  });
+
+  app.post("/api/servers/:id/databases/:db/password", async (req) => {
+    const t = await dbTarget(req);
+    const r = await t.client.resetDatabasePassword(t.id, t.name);
+    await audit(db, { userId: t.me.id, action: "database.password.reset", serverId: t.id, ip: t.ip, detail: { name: t.name } });
+    return r;
+  });
+
+  app.delete("/api/servers/:id/databases/:db", async (req) => {
+    const t = await dbTarget(req);
+    const r = await t.client.deleteDatabase(t.id, t.name);
+    await audit(db, { userId: t.me.id, action: "database.delete", serverId: t.id, ip: t.ip, detail: { name: t.name, snapshot: r.snapshot } });
+    return r;
+  });
+
+  app.get("/api/servers/:id/databases/:db/tables", async (req) => {
+    const t = await dbTarget(req);
+    return t.client.databaseTables(t.id, t.name);
+  });
+
+  app.get("/api/servers/:id/databases/:db/rows", async (req) => {
+    const t = await dbTarget(req);
+    const q = dbRowsQuerySchema.parse(req.query);
+    return t.client.databaseRows(t.id, t.name, q.table, q.page, q.pageSize);
+  });
+
+  app.post("/api/servers/:id/databases/:db/query", async (req) => {
+    const t = await dbTarget(req);
+    const q = dbQuerySchema.parse(req.body);
+    const r = await t.client.databaseQuery(t.id, t.name, q.sql, q.write);
+    if (q.write) await audit(db, { userId: t.me.id, action: "database.query.write", serverId: t.id, ip: t.ip, detail: { name: t.name, sql: q.sql.slice(0, 2000), affected: r.affected, snapshot: r.snapshot } });
+    return r;
+  });
+
+  app.post("/api/servers/:id/databases/:db/rows/update", { bodyLimit: 1024 * 1024 }, async (req) => {
+    const t = await dbTarget(req);
+    const e = dbRowEditSchema.parse(req.body);
+    if (!e.set || !Object.keys(e.set).length) throw new HttpError(400, "nothing to change");
+    const r = await t.client.databaseRowUpdate(t.id, t.name, { table: e.table, key: e.key, set: e.set });
+    await audit(db, { userId: t.me.id, action: "database.row.update", serverId: t.id, ip: t.ip, detail: { name: t.name, table: e.table, key: e.key, columns: Object.keys(e.set), snapshot: r.snapshot } });
+    return r;
+  });
+
+  app.post("/api/servers/:id/databases/:db/rows/delete", { bodyLimit: 1024 * 1024 }, async (req) => {
+    const t = await dbTarget(req);
+    const e = dbRowEditSchema.parse(req.body);
+    const r = await t.client.databaseRowDelete(t.id, t.name, { table: e.table, key: e.key });
+    await audit(db, { userId: t.me.id, action: "database.row.delete", serverId: t.id, ip: t.ip, detail: { name: t.name, table: e.table, key: e.key, snapshot: r.snapshot } });
+    return r;
   });
 
   // --- logs --------------------------------------------------------------------------

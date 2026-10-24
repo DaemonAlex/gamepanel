@@ -89,6 +89,9 @@ export interface BackupDeps {
   uid: number;
   // Called after a restore swapped the folder (e.g. to put the disk cap back).
   afterRestore?: (id: string) => Promise<void>;
+  // Puts extra files in the folder just before it is archived (database dumps);
+  // returns the cleanup, run whether or not the backup worked.
+  beforeArchive?: (id: string, dir: string) => Promise<() => Promise<void>>;
 }
 
 export class Backups {
@@ -139,9 +142,11 @@ export class Backups {
     const running = await this.deps.isRunning(job.serverId);
     const name = backupName(reason);
     const out = await this.store.writer(job.serverId, name);
+    let cleanup: (() => Promise<void>) | null = null;
     try {
       // Flush the world to disk and hold saving while the archive is made.
       if (running) await this.deps.rcon(job.serverId, ["save-off", "save-all flush"]);
+      if (this.deps.beforeArchive) cleanup = await this.deps.beforeArchive(job.serverId, dir);
       const counter = new Transform({
         transform(chunk: Buffer, _e, done) {
           job.bytes += chunk.length;
@@ -171,6 +176,7 @@ export class Backups {
       job.state = "failed";
       job.error = (err as Error).message;
     } finally {
+      if (cleanup) await cleanup().catch(() => {});
       if (running) await this.deps.rcon(job.serverId, ["save-on"]).catch(() => {});
       job.finishedAt = new Date().toISOString();
     }
