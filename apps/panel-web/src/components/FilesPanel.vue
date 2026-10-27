@@ -169,9 +169,9 @@ async function onUpload(ev: Event) {
 <template>
   <section class="files">
     <template v-if="editing">
-      <div class="row bar">
+      <div class="row toolbar">
         <span class="mono crumb">{{ editing }}</span>
-        <span v-if="dirty" class="label gold">Not saved</span>
+        <span v-if="dirty" class="label unsaved">Not saved</span>
         <button class="btn gold" type="button" :disabled="!dirty || saving" @click="save"><Save /> {{ saving ? "Saving" : "Save" }}</button>
         <template v-if="!confirmClose">
           <button class="btn" type="button" @click="close()"><X /> Close</button>
@@ -265,9 +265,9 @@ async function onUpload(ev: Event) {
 
 <style scoped>
 .files { display: flex; flex-direction: column; gap: 12px; }
-.bar { justify-content: flex-end; }
+.toolbar { justify-content: flex-end; } /* not .bar: that is the global 6 px progress bar */
 .crumb { flex: 1; min-width: 0; overflow-wrap: anywhere; }
-.gold { color: var(--gold); }
+.unsaved { color: var(--gold); } /* was .gold: that also matched every .btn.gold in this tab and painted their text gold on gold */
 .crumbs { gap: 6px; }
 .link { background: none; border: 0; color: var(--gold); font: inherit; cursor: pointer; padding: 2px 0; text-align: left; }
 .link:hover { text-decoration: underline; }

@@ -70,7 +70,7 @@ onUnmounted(() => ws?.close());
 
 <template>
   <section class="console">
-    <div class="row bar">
+    <div class="row toolbar">
       <span class="label">Console</span>
       <span class="label" :class="state">{{ state }}</span>
       <button v-if="state === 'closed'" class="btn small" type="button" @click="connect">Reconnect</button>
@@ -88,7 +88,7 @@ onUnmounted(() => ws?.close());
 
 <style scoped>
 .console { display: flex; flex-direction: column; gap: 8px; }
-.bar { justify-content: space-between; }
+.toolbar { justify-content: space-between; } /* not .bar: that is the global 6 px progress bar */
 .open { color: var(--ok); }
 .closed { color: var(--bad); }
 .log {
